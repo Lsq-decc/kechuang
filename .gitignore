@@ -9,3 +9,8 @@ instance/*
 instance/uploads/*
 !instance/uploads/.gitkeep
 instance/paddle_runtime/
+.deploy/
+runtime/
+wheelhouse/
+wheels/
+offline/
