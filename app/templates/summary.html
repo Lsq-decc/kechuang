@@ -1,0 +1,425 @@
+{% extends "base.html" %}
+{% block title %}无课汇总导出 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">汇总表</p>
+    <h1>部门成员无课汇总</h1>
+    <p class="muted" data-summary-status>正在加载部门...</p>
+  </div>
+  <button class="button primary" type="button" data-export disabled>导出 Excel</button>
+</section>
+
+<form class="tool-panel summary-form" data-summary-form>
+  <label>
+    部门
+    <select name="department" data-summary-department>
+      <option value="">所有部门</option>
+    </select>
+  </label>
+  <label>
+    教学周
+    <input name="week_number" data-summary-week type="number" min="1" max="30" value="1" required>
+  </label>
+  <button class="button secondary" type="submit">立即生成</button>
+  <p class="form-error" data-summary-error></p>
+</form>
+
+<section class="summary-stats hidden" data-summary-stats>
+  <div><span>成员</span><strong data-summary-member-count>0</strong></div>
+  <div><span>已有课表</span><strong data-summary-scheduled-count>0</strong></div>
+  <div><span>全员无课时段</span><strong data-summary-common-count>0</strong></div>
+  <div><span>生成时间</span><strong data-summary-generated>--</strong></div>
+</section>
+
+<div class="table-wrap summary-wrap">
+  <table class="summary-table">
+    <thead data-summary-head></thead>
+    <tbody data-summary-body>
+      <tr><td class="empty-cell">正在生成汇总表...</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<section class="summary-total-panel">
+  <div class="form-heading">
+    <div>
+      <h2>总无课表</h2>
+      <p class="muted">按星期和节次列出该时段没有课的全部成员</p>
+    </div>
+  </div>
+  <div class="summary-edit-bar">
+    <label>
+      修改成员状态
+      <select data-summary-member-select>
+        <option value="">请选择成员</option>
+      </select>
+    </label>
+    <span class="muted" data-summary-edit-hint>选择成员后，可在每个时段右上角点击 + 或 − 调整无课状态</span>
+    <button class="button secondary hidden" type="button" data-summary-reset-overrides>
+      恢复课表判断
+    </button>
+    <button class="button secondary" type="button" data-toggle-add-member>
+      添加成员
+    </button>
+    <button class="button secondary danger-button" type="button" data-delete-selected-member disabled>
+      删除选中成员
+    </button>
+  </div>
+  <form class="tool-panel summary-add-member hidden" data-add-member-form>
+    <div class="form-grid three">
+      <label>姓名<input name="name" required></label>
+      <label>学号/工号<input name="student_id"></label>
+      <label>部门<input name="department" required></label>
+    </div>
+    <p class="form-error" data-add-member-error></p>
+    <div class="form-actions">
+      <button class="button primary" type="submit">确认添加</button>
+    </div>
+  </form>
+  <div class="table-wrap">
+    <table class="data-table summary-free-table">
+      <thead data-summary-free-head></thead>
+      <tbody data-summary-free-body>
+        <tr><td colspan="5" class="empty-cell">正在生成总无课表...</td></tr>
+      </tbody>
+    </table>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const summaryForm = document.querySelector("[data-summary-form]");
+const departmentSelect = document.querySelector("[data-summary-department]");
+const weekInput = document.querySelector("[data-summary-week]");
+const errorBox = document.querySelector("[data-summary-error]");
+const exportButton = document.querySelector("[data-export]");
+const memberEditorSelect = document.querySelector("[data-summary-member-select]");
+const resetOverridesButton = document.querySelector("[data-summary-reset-overrides]");
+const toggleAddMemberButton = document.querySelector("[data-toggle-add-member]");
+const deleteSelectedMemberButton = document.querySelector("[data-delete-selected-member]");
+const addMemberForm = document.querySelector("[data-add-member-form]");
+let currentSummary = null;
+let generateTimer = null;
+let selectedMemberId = "";
+
+function summaryParams() {
+  return new URLSearchParams({
+    department: departmentSelect.value,
+    week_number: weekInput.value
+  });
+}
+
+function renderSummary(summary) {
+  currentSummary = summary;
+  document.querySelector("[data-summary-status]").textContent =
+    `${summary.department_label} · 第 ${summary.week_number} 周`;
+  document.querySelector("[data-summary-member-count]").textContent = summary.member_count;
+  document.querySelector("[data-summary-scheduled-count]").textContent = summary.scheduled_count;
+  document.querySelector("[data-summary-common-count]").textContent = summary.all_free_count;
+  document.querySelector("[data-summary-generated]").textContent =
+    summary.generated_at.replace("T", " ");
+  document.querySelector("[data-summary-stats]").classList.remove("hidden");
+  exportButton.disabled = false;
+  renderMemberEditor(summary);
+
+  const head = document.querySelector("[data-summary-head]");
+  const body = document.querySelector("[data-summary-body]");
+  const periods = summary.periods;
+  head.innerHTML = `
+    <tr>
+      <th class="summary-name summary-sticky" rowspan="2">姓名</th>
+      <th class="summary-sid summary-sticky-secondary" rowspan="2">学号/工号</th>
+      ${summary.weekdays.map((weekday) => `<th colspan="${periods.length}">${API.escapeHtml(weekday)}</th>`).join("")}
+      <th class="summary-total summary-sticky-right" rowspan="2">无课节数</th>
+    </tr>
+    <tr>
+      ${summary.weekdays.map(() => periods.map((period) => `<th class="summary-period">${period}</th>`).join("")).join("")}
+    </tr>
+  `;
+
+  if (!summary.members.length) {
+    body.innerHTML = `<tr><td class="empty-cell" colspan="${periods.length * summary.weekdays.length + 3}">该部门还没有成员资料</td></tr>`;
+    renderFreeStudents(summary);
+    return;
+  }
+
+  body.innerHTML = summary.members.map((member) => `
+    <tr>
+      <td class="summary-name summary-sticky"><strong>${API.escapeHtml(member.name)}</strong></td>
+      <td class="summary-sid summary-sticky-secondary">${API.escapeHtml(member.student_id || "-")}</td>
+      ${member.cells.map((cell, index) => {
+        const commonFree = cell.free && summary.all_free[index];
+        const label = cell.free
+          ? (cell.manual_override ? "无课（手动）" : "无课")
+          : cell.courses.join(" / ");
+        return `<td class="summary-cell ${cell.free ? "free" : "busy"} ${commonFree ? "common-free" : ""} ${cell.manual_override ? "manual-override" : ""}" title="${API.escapeHtml(label)}">${API.escapeHtml(label)}</td>`;
+      }).join("")}
+      <td class="summary-total summary-sticky-right">${member.free_count}</td>
+    </tr>
+  `).join("") + `
+    <tr class="summary-common-row">
+      <td class="summary-name summary-sticky"><strong>全员无课</strong></td>
+      <td class="summary-sid summary-sticky-secondary"></td>
+      ${summary.all_free.map((isFree) => `<td class="summary-cell ${isFree ? "common-free" : ""}">${isFree ? "全员无课" : ""}</td>`).join("")}
+      <td class="summary-total summary-sticky-right">${summary.all_free_count}</td>
+    </tr>
+  `;
+  renderFreeStudents(summary);
+}
+
+function renderFreeStudents(summary) {
+  const freeHead = document.querySelector("[data-summary-free-head]");
+  const freeBody = document.querySelector("[data-summary-free-body]");
+  const weekdays = summary.weekdays || [];
+  const rows = summary.free_table_rows || [];
+  freeHead.innerHTML = `
+    <tr>
+      <th rowspan="2">节次</th>
+      <th rowspan="2">时间</th>
+      <th colspan="${weekdays.length}">星期</th>
+    </tr>
+    <tr>
+      ${weekdays.map((weekday) => `<th>${API.escapeHtml(weekday)}</th>`).join("")}
+    </tr>
+  `;
+  freeBody.innerHTML = rows.map((row) => {
+    const cellsHtml = row.cells.map((cell) => {
+      const names = cell.free_students || [];
+      const namesHtml = names.length
+        ? `<div class="summary-free-names">${names.map((member) =>
+            `<span class="summary-free-name" title="${API.escapeHtml(member.department || "")}">${API.escapeHtml(member.name)}</span>`
+          ).join("")}</div>`
+        : '<span class="muted">无人无课</span>';
+      const isSelectedFree = names.some(
+        (member) => String(member.id) === String(selectedMemberId)
+      );
+      const selectedMember = selectedMemberId
+        ? (summary.members || []).find(
+            (member) => String(member.id) === String(selectedMemberId)
+          )
+        : null;
+      const override = (cell.manual_overrides || []).find(
+        (item) => String(item.user_id) === String(selectedMemberId)
+      );
+      const editActions = selectedMember
+        ? `
+          <div class="summary-edit-actions">
+            <button
+              class="summary-edit-button plus ${isSelectedFree ? "active" : ""}"
+              type="button"
+              title="加入无课"
+              data-summary-override
+              data-user-id="${selectedMember.id}"
+              data-weekday="${cell.weekday}"
+              data-start-period="${cell.start_period}"
+              data-end-period="${cell.end_period}"
+              data-is-free="true"
+            >+</button>
+            <button
+              class="summary-edit-button minus ${!isSelectedFree ? "active" : ""}"
+              type="button"
+              title="移出无课"
+              data-summary-override
+              data-user-id="${selectedMember.id}"
+              data-weekday="${cell.weekday}"
+              data-start-period="${cell.start_period}"
+              data-end-period="${cell.end_period}"
+              data-is-free="false"
+            >−</button>
+          </div>
+        `
+        : "";
+      return `
+        <td class="summary-free-cell ${cell.all_free ? "all-free" : ""} ${override ? "manual-override" : ""}">
+          ${editActions}
+          ${namesHtml}
+          <small class="summary-free-count">${cell.free_count} 人</small>
+        </td>
+      `;
+    }).join("");
+    return `
+      <tr>
+        <td class="summary-free-period"><strong>${API.escapeHtml(row.label)} 节</strong></td>
+        <td class="summary-free-time">${API.escapeHtml(row.time_range || "-")}</td>
+        ${cellsHtml}
+      </tr>
+    `;
+  }).join("") || `<tr><td colspan="${weekdays.length + 2}" class="empty-cell">暂无成员数据</td></tr>`;
+}
+
+function renderMemberEditor(summary) {
+  const members = summary.members || [];
+  if (!members.some((member) => String(member.id) === String(selectedMemberId))) {
+    selectedMemberId = "";
+  }
+  memberEditorSelect.innerHTML = '<option value="">请选择成员</option>' + members
+    .map((member) => `
+      <option value="${member.id}" ${String(member.id) === String(selectedMemberId) ? "selected" : ""}>
+        ${API.escapeHtml(member.department)} · ${API.escapeHtml(member.name)}
+      </option>
+    `)
+    .join("");
+  resetOverridesButton.classList.toggle("hidden", !selectedMemberId);
+  deleteSelectedMemberButton.disabled = !selectedMemberId;
+}
+
+async function generateSummary() {
+  errorBox.textContent = "";
+  document.querySelector("[data-summary-status]").textContent = "正在生成...";
+  const result = await API.request(`/api/availability-summary?${summaryParams().toString()}`);
+  if (!result.ok) {
+    currentSummary = null;
+    exportButton.disabled = true;
+    errorBox.textContent = result.message;
+    document.querySelector("[data-summary-body]").innerHTML =
+      `<tr><td class="empty-cell">${API.escapeHtml(result.message)}</td></tr>`;
+    return;
+  }
+  renderSummary(result.summary);
+}
+
+async function loadDepartments() {
+  const result = await API.request("/api/departments");
+  if (!result.ok) {
+    errorBox.textContent = result.message;
+    return;
+  }
+  departmentSelect.innerHTML = '<option value="">所有部门</option>' + result.departments
+    .map((department) => `<option value="${API.escapeHtml(department)}">${API.escapeHtml(department)}</option>`)
+    .join("");
+  generateSummary();
+}
+
+summaryForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  generateSummary();
+});
+
+memberEditorSelect.addEventListener("change", () => {
+  selectedMemberId = memberEditorSelect.value;
+  resetOverridesButton.classList.toggle("hidden", !selectedMemberId);
+  deleteSelectedMemberButton.disabled = !selectedMemberId;
+  if (currentSummary) renderFreeStudents(currentSummary);
+});
+
+toggleAddMemberButton.addEventListener("click", () => {
+  const willOpen = addMemberForm.classList.contains("hidden");
+  addMemberForm.classList.toggle("hidden", !willOpen);
+  if (willOpen) {
+    const member = currentSummary?.members?.find(
+      (item) => String(item.id) === String(selectedMemberId)
+    );
+    const departmentInput = addMemberForm.elements.department;
+    if (!departmentInput.value) {
+      departmentInput.value = departmentSelect.value || member?.department || "";
+    }
+    addMemberForm.elements.name.focus();
+  }
+});
+
+addMemberForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = addMemberForm.querySelector("[data-add-member-error]");
+  error.textContent = "";
+  const button = addMemberForm.querySelector("button[type='submit']");
+  button.disabled = true;
+  const payload = Object.fromEntries(new FormData(addMemberForm));
+  payload.role = "member";
+  const result = await API.request("/api/users", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  button.disabled = false;
+  if (result.ok) {
+    selectedMemberId = String(result.user.id);
+    addMemberForm.reset();
+    addMemberForm.classList.add("hidden");
+    API.toast(result.message);
+    generateSummary();
+  } else {
+    error.textContent = result.message;
+  }
+});
+
+deleteSelectedMemberButton.addEventListener("click", async () => {
+  if (!selectedMemberId || !currentSummary) return;
+  const member = currentSummary.members.find(
+    (item) => String(item.id) === String(selectedMemberId)
+  );
+  if (!member || !window.confirm(`确定删除成员“${member.name}”及其课表数据吗？`)) return;
+
+  deleteSelectedMemberButton.disabled = true;
+  const result = await API.request(`/api/users/${member.id}`, { method: "DELETE" });
+  if (result.ok) {
+    selectedMemberId = "";
+    API.toast(result.message);
+    generateSummary();
+  } else {
+    deleteSelectedMemberButton.disabled = false;
+    errorBox.textContent = result.message;
+  }
+});
+
+document.querySelector("[data-summary-free-body]").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-summary-override]");
+  if (!button || !currentSummary) return;
+  button.disabled = true;
+  const result = await API.request("/api/availability-overrides", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: Number(button.dataset.userId),
+      week_number: Number(currentSummary.week_number),
+      weekday: Number(button.dataset.weekday),
+      start_period: Number(button.dataset.startPeriod),
+      end_period: Number(button.dataset.endPeriod),
+      is_free: button.dataset.isFree === "true"
+    })
+  });
+  button.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    generateSummary();
+  } else {
+    errorBox.textContent = result.message;
+  }
+});
+
+resetOverridesButton.addEventListener("click", async () => {
+  if (!currentSummary || !selectedMemberId) return;
+  const params = new URLSearchParams({
+    user_id: selectedMemberId,
+    week_number: currentSummary.week_number
+  });
+  resetOverridesButton.disabled = true;
+  const result = await API.request(`/api/availability-overrides?${params.toString()}`, {
+    method: "DELETE"
+  });
+  resetOverridesButton.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    generateSummary();
+  } else {
+    errorBox.textContent = result.message;
+  }
+});
+
+[departmentSelect, weekInput].forEach((input) => {
+  input.addEventListener("input", () => {
+    clearTimeout(generateTimer);
+    generateTimer = setTimeout(generateSummary, 250);
+  });
+  input.addEventListener("change", () => {
+    clearTimeout(generateTimer);
+    generateSummary();
+  });
+});
+
+exportButton.addEventListener("click", () => {
+  if (!currentSummary) return;
+  window.location.href = `/api/availability-summary/export?${summaryParams().toString()}`;
+});
+
+loadDepartments();
+</script>
+{% endblock %}

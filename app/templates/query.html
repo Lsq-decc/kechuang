@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block title %}无课查询 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">成员筛选</p>
+    <h1>查询无课成员</h1>
+  </div>
+</section>
+
+<form class="tool-panel query-form" data-query-form>
+  <label>
+    星期
+    <select name="weekday" required>
+      <option value="1">周一</option>
+      <option value="2">周二</option>
+      <option value="3">周三</option>
+      <option value="4">周四</option>
+      <option value="5">周五</option>
+      <option value="6">周六</option>
+      <option value="7">周日</option>
+    </select>
+  </label>
+  <label>
+    开始节次
+    <input name="start_period" type="number" min="1" max="12" value="1" required>
+  </label>
+  <label>
+    结束节次
+    <input name="end_period" type="number" min="1" max="12" value="2" required>
+  </label>
+  <label>
+    教学周
+    <input name="week_number" type="number" min="1" max="30" placeholder="选填">
+  </label>
+  <label>
+    部门
+    <select name="department" data-department>
+      <option value="">全部部门</option>
+    </select>
+  </label>
+  <button class="button primary" type="submit">查询</button>
+  <p class="form-error wide-field" data-form-error></p>
+</form>
+
+<section class="result-heading hidden" data-result-heading>
+  <div>
+    <h2>查询结果</h2>
+    <p class="muted" data-result-summary></p>
+  </div>
+  <div class="segmented" role="group" aria-label="结果筛选">
+    <button class="active" type="button" data-result-filter="available">无课</button>
+    <button type="button" data-result-filter="busy">有课</button>
+    <button type="button" data-result-filter="all">全部</button>
+  </div>
+</section>
+
+<div class="table-wrap hidden" data-result-table-wrap>
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>状态</th>
+        <th>姓名</th>
+        <th>学号/工号</th>
+        <th>部门</th>
+        <th>角色</th>
+        <th>该日课程</th>
+      </tr>
+    </thead>
+    <tbody data-result-body></tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let resultMembers = [];
+let activeFilter = "available";
+
+function courseSummary(courses) {
+  if (!courses.length) return '<span class="muted">无该日课程</span>';
+  return courses.map((course) => `
+    <span class="course-chip ${course.conflicts ? "conflict" : ""}">
+      ${API.escapeHtml(course.course_name)} · 第${course.start_period}-${course.end_period}节
+      ${course.weeks ? ` · ${API.escapeHtml(course.weeks)}` : ""}
+    </span>
+  `).join("");
+}
+
+function renderMembers() {
+  const rows = resultMembers.filter((member) => {
+    if (activeFilter === "available") return !member.has_class;
+    if (activeFilter === "busy") return member.has_class;
+    return true;
+  });
+  document.querySelector("[data-result-body]").innerHTML = rows.map((member) => `
+    <tr>
+      <td><span class="status-badge ${member.has_class ? "busy" : "available"}">${member.has_class ? "有课" : "无课"}</span></td>
+      <td><strong>${API.escapeHtml(member.name)}</strong></td>
+      <td>${API.escapeHtml(member.student_id || "-")}</td>
+      <td>${API.escapeHtml(member.department || "-")}</td>
+      <td>${API.escapeHtml(member.role_label)}</td>
+      <td><div class="course-list">${courseSummary(member.courses || [])}</div></td>
+    </tr>
+  `).join("") || '<tr><td colspan="6" class="empty-cell">没有符合条件的成员</td></tr>';
+}
+
+document.querySelector("[data-query-form]").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorBox = form.querySelector("[data-form-error]");
+  const button = form.querySelector("button[type='submit']");
+  errorBox.textContent = "";
+  button.disabled = true;
+  const params = new URLSearchParams(new FormData(form));
+  const result = await API.request(`/api/availability?${params.toString()}`);
+  button.disabled = false;
+  if (!result.ok) {
+    errorBox.textContent = result.message;
+    return;
+  }
+  resultMembers = result.members;
+  document.querySelector("[data-result-heading]").classList.remove("hidden");
+  document.querySelector("[data-result-table-wrap]").classList.remove("hidden");
+  document.querySelector("[data-result-summary]").textContent =
+    `共 ${result.total} 人，${result.available_count} 人无课，${result.busy_count} 人有课`;
+  renderMembers();
+});
+
+document.querySelectorAll("[data-result-filter]").forEach((button) => {
+  button.addEventListener("click", () => {
+    activeFilter = button.dataset.resultFilter;
+    document.querySelectorAll("[data-result-filter]").forEach((item) => item.classList.remove("active"));
+    button.classList.add("active");
+    renderMembers();
+  });
+});
+
+(async () => {
+  const result = await API.request("/api/departments");
+  if (!result.ok) return;
+  const select = document.querySelector("[data-department]");
+  result.departments.forEach((department) => {
+    const option = document.createElement("option");
+    option.value = department;
+    option.textContent = department;
+    select.append(option);
+  });
+})();
+</script>
+{% endblock %}
+

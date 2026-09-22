@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}首页 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading">
+  <div>
+    <p class="eyebrow">工作台</p>
+    <h1>{{ current_user.name }}，你好</h1>
+    <p class="muted">管理员工作台 · {{ current_user.department }}</p>
+  </div>
+  <a class="button primary" href="{{ url_for('views.upload') }}">上传成员课表</a>
+</section>
+
+<section class="metric-strip">
+  <div class="metric">
+    <span>成员资料</span>
+    <strong data-member-count>--</strong>
+  </div>
+  <div class="metric">
+    <span>已录入课程</span>
+    <strong data-course-count>--</strong>
+  </div>
+  <div class="metric">
+    <span>已有课表成员</span>
+    <strong data-covered-count>--</strong>
+  </div>
+  <div class="metric">
+    <span>部门数量</span>
+    <strong data-department-count>--</strong>
+  </div>
+</section>
+
+<section class="action-grid">
+  <a class="action-row" href="{{ url_for('views.upload') }}">
+    <span>
+      <strong>上传成员课表</strong>
+      <small>选择成员，上传截图并核对课程</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+  <a class="action-row" href="{{ url_for('views.batch_upload') }}">
+    <span>
+      <strong>批量上传课表</strong>
+      <small>一次选择多张截图并按文件名匹配成员</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+  <a class="action-row" href="{{ url_for('views.users') }}">
+    <span>
+      <strong>成员与账号管理</strong>
+      <small>维护成员资料及所有成员课表</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+  <a class="action-row" href="{{ url_for('views.query') }}">
+    <span>
+      <strong>查询无课成员</strong>
+      <small>按星期、节次和周次筛选</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+  <a class="action-row" href="{{ url_for('views.summary') }}">
+    <span>
+      <strong>生成无课汇总表</strong>
+      <small>按部门和周次预览并导出 Excel</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+  <a class="action-row" href="{{ url_for('views.materials') }}">
+    <span>
+      <strong>部门资料库</strong>
+      <small>按部门分类存放文件夹、照片和常用文件</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+  <a class="action-row" href="{{ url_for('views.todos') }}">
+    <span>
+      <strong>待办事项</strong>
+      <small>记录工作事项，按完成状态和重要程度管理</small>
+    </span>
+    <span class="arrow">→</span>
+  </a>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(async () => {
+  const result = await API.request("/api/admin/stats");
+  if (result.ok) {
+    document.querySelector("[data-member-count]").textContent = result.stats.total_members;
+    document.querySelector("[data-course-count]").textContent = result.stats.total_courses;
+    document.querySelector("[data-covered-count]").textContent = result.stats.covered_members;
+    document.querySelector("[data-department-count]").textContent = result.stats.department_count;
+  }
+})();
+</script>
+{% endblock %}

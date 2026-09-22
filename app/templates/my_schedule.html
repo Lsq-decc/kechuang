@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+{% block title %}我的课表 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">课程数据</p>
+    <h1>我的课表</h1>
+    <p class="muted" data-schedule-summary>正在加载...</p>
+  </div>
+  <a class="button primary" href="{{ url_for('views.upload') }}">上传新课表</a>
+</section>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>星期</th>
+        <th>节次</th>
+        <th>课程名称</th>
+        <th>周数</th>
+        <th>地点</th>
+        <th>备注</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody data-schedule-body>
+      <tr><td colspan="7" class="empty-cell">正在加载课程...</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadSchedule() {
+  const result = await API.request("/api/schedules/me");
+  const body = document.querySelector("[data-schedule-body]");
+  if (!result.ok) {
+    body.innerHTML = `<tr><td colspan="7" class="empty-cell">${API.escapeHtml(result.message)}</td></tr>`;
+    return;
+  }
+  document.querySelector("[data-schedule-summary]").textContent = `共 ${result.courses.length} 条课程`;
+  body.innerHTML = result.courses.map((course) => `
+    <tr>
+      <td>${API.escapeHtml(course.weekday_label)}</td>
+      <td>${API.escapeHtml(course.period_label)}</td>
+      <td><strong>${API.escapeHtml(course.course_name)}</strong></td>
+      <td>${API.escapeHtml(course.weeks || "-")}</td>
+      <td>${API.escapeHtml(course.location || "-")}</td>
+      <td>${API.escapeHtml(course.note || "-")}</td>
+      <td><button class="text-button danger" type="button" data-delete-course="${course.id}">删除</button></td>
+    </tr>
+  `).join("") || '<tr><td colspan="7" class="empty-cell">尚未录入课表</td></tr>';
+}
+
+document.querySelector("[data-schedule-body]").addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-delete-course]");
+  if (!button || !window.confirm("确定删除这条课程吗？")) return;
+  const result = await API.request(`/api/schedules/courses/${button.dataset.deleteCourse}`, {
+    method: "DELETE"
+  });
+  if (result.ok) {
+    API.toast(result.message);
+    loadSchedule();
+  } else {
+    API.toast(result.message, "error");
+  }
+});
+
+loadSchedule();
+</script>
+{% endblock %}
+

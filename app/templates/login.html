@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+{% block title %}登录 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="auth-panel">
+  <div class="auth-brand">
+    <span class="auth-seal">科创</span>
+    <p class="eyebrow">共青团湖北大学委员会</p>
+    <h1>大学生科创实践中心<br>管理系统</h1>
+  </div>
+  <form class="form-panel" data-login-form>
+    <div class="form-heading">
+      <h2>管理员登录</h2>
+    </div>
+    <label>
+      管理员用户名
+      <input name="username" autocomplete="username" required autofocus>
+    </label>
+    <label>
+      密码
+      <input name="password" type="password" autocomplete="current-password" required>
+    </label>
+    <p class="form-error" data-form-error></p>
+    <button class="button primary wide" type="submit">进入管理后台</button>
+  </form>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+document.querySelector("[data-login-form]").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const errorBox = form.querySelector("[data-form-error]");
+  errorBox.textContent = "";
+  const button = form.querySelector("button[type='submit']");
+  button.disabled = true;
+  const result = await API.request("/api/auth/login", {
+    method: "POST",
+    body: JSON.stringify(Object.fromEntries(new FormData(form)))
+  });
+  button.disabled = false;
+  if (result.ok) {
+    window.location.href = "/dashboard";
+  } else {
+    errorBox.textContent = result.message;
+  }
+});
+</script>
+{% endblock %}

@@ -1,0 +1,166 @@
+{% extends "base.html" %}
+{% block title %}{{ target_user.name }}的课表 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">账号课表</p>
+    <h1>{{ target_user.name }}的课表</h1>
+    <p class="muted">{{ target_user.department }} · {{ target_user.username }}</p>
+  </div>
+  <div class="heading-actions">
+    <a class="button secondary" href="{{ url_for('views.users') }}">返回账号管理</a>
+    <a class="button primary" href="{{ url_for('views.upload', user_id=target_user.id) }}">上传截图代录</a>
+  </div>
+</section>
+
+<div class="table-toolbar">
+  <span><strong data-course-count>0</strong> 条课程</span>
+  <button class="button secondary" type="button" data-add-course>新增课程</button>
+</div>
+<div class="table-wrap">
+  <table class="data-table editable-table">
+    <thead>
+      <tr>
+        <th class="col-weekday">星期</th>
+        <th class="col-period">开始节</th>
+        <th class="col-period">结束节</th>
+        <th class="col-name">课程名称</th>
+        <th class="col-weeks">周数</th>
+        <th class="col-place">地点</th>
+        <th class="col-note">备注</th>
+        <th class="col-action">操作</th>
+      </tr>
+    </thead>
+    <tbody data-course-body></tbody>
+  </table>
+</div>
+<div class="empty-state hidden" data-empty-state>当前还没有课程，请点击“新增课程”。</div>
+
+<div class="save-bar">
+  <label class="inline-field">
+    保存方式
+    <select data-save-mode>
+      <option value="replace">覆盖该账号课表</option>
+      <option value="append">追加到该账号课表</option>
+    </select>
+  </label>
+  <p class="form-error" data-form-error></p>
+  <button class="button primary" type="button" data-save-schedule>保存课表</button>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const targetUserId = {{ target_user.id }};
+let courses = [];
+
+const body = document.querySelector("[data-course-body]");
+const emptyState = document.querySelector("[data-empty-state]");
+const count = document.querySelector("[data-course-count]");
+const errorBox = document.querySelector("[data-form-error]");
+
+function weekdayOptions(selected) {
+  return ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
+    .map((label, index) => `<option value="${index + 1}" ${selected === index + 1 ? "selected" : ""}>${label}</option>`)
+    .join("");
+}
+
+function render() {
+  count.textContent = courses.length;
+  emptyState.classList.toggle("hidden", courses.length > 0);
+  body.innerHTML = courses.map((course, index) => `
+    <tr data-index="${index}">
+      <td><select data-field="weekday">${weekdayOptions(Number(course.weekday))}</select></td>
+      <td><input data-field="start_period" type="number" min="1" max="10" value="${Number(course.start_period) || 1}"></td>
+      <td><input data-field="end_period" type="number" min="1" max="10" value="${Number(course.end_period) || 2}"></td>
+      <td><input data-field="course_name" value="${API.escapeHtml(course.course_name || "")}" maxlength="150"></td>
+      <td><input data-field="weeks" value="${API.escapeHtml(course.weeks || "")}" maxlength="255" placeholder="如：1-16周"></td>
+      <td><input data-field="location" value="${API.escapeHtml(course.location || "")}" maxlength="150"></td>
+      <td><input data-field="note" value="${API.escapeHtml(course.note || "")}" maxlength="255"></td>
+      <td><button class="text-button danger" type="button" data-remove="${index}">移除</button></td>
+    </tr>
+  `).join("");
+}
+
+async function loadSchedule() {
+  const result = await API.request(`/api/schedules/users/${targetUserId}`);
+  if (!result.ok) {
+    body.innerHTML = `<tr><td colspan="8" class="empty-cell">${API.escapeHtml(result.message)}</td></tr>`;
+    return;
+  }
+  courses = result.courses || [];
+  render();
+}
+
+body.addEventListener("input", (event) => {
+  const row = event.target.closest("tr[data-index]");
+  const field = event.target.dataset.field;
+  if (!row || !field) return;
+  courses[Number(row.dataset.index)][field] = event.target.value;
+});
+
+body.addEventListener("change", (event) => {
+  const row = event.target.closest("tr[data-index]");
+  const field = event.target.dataset.field;
+  if (!row || !field) return;
+  courses[Number(row.dataset.index)][field] = event.target.value;
+});
+
+body.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-remove]");
+  if (!button) return;
+  courses.splice(Number(button.dataset.remove), 1);
+  render();
+});
+
+document.querySelector("[data-add-course]").addEventListener("click", () => {
+  courses.push({
+    weekday: 1,
+    start_period: 1,
+    end_period: 2,
+    course_name: "",
+    weeks: "",
+    location: "",
+    note: ""
+  });
+  render();
+  body.lastElementChild?.querySelector("[data-field='course_name']")?.focus();
+});
+
+document.querySelector("[data-save-schedule]").addEventListener("click", async (event) => {
+  errorBox.textContent = "";
+  const saveMode = document.querySelector("[data-save-mode]").value;
+  if (saveMode === "replace" && courses.length && !window.confirm("覆盖后会替换该账号当前的全部课程，确定继续吗？")) {
+    return;
+  }
+  const normalized = courses.map((course) => ({
+    ...course,
+    weekday: Number(course.weekday),
+    start_period: Number(course.start_period),
+    end_period: Number(course.end_period),
+    course_name: String(course.course_name || "").trim(),
+    weeks: String(course.weeks || "").trim(),
+    location: String(course.location || "").trim(),
+    note: String(course.note || "").trim()
+  }));
+  const button = event.currentTarget;
+  button.disabled = true;
+  const result = await API.request("/api/schedules/save", {
+    method: "POST",
+    body: JSON.stringify({
+      user_id: targetUserId,
+      courses: normalized,
+      replace_existing: saveMode === "replace"
+    })
+  });
+  button.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    loadSchedule();
+  } else {
+    errorBox.textContent = result.message;
+  }
+});
+
+loadSchedule();
+</script>
+{% endblock %}

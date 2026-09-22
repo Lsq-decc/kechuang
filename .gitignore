@@ -1,0 +1,11 @@
+.env
+.env.production
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+instance/*
+!instance/uploads/
+instance/uploads/*
+!instance/uploads/.gitkeep
+instance/paddle_runtime/

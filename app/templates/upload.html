@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+{% block title %}上传成员课表 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">课表录入</p>
+    <h1>上传成员课表</h1>
+  </div>
+</section>
+
+<form class="tool-panel" data-upload-form>
+  <div class="form-grid two upload-meta">
+    <label>
+      课表所属成员
+      <select name="target_user_id" data-member-select required>
+        <option value="__auto__">自动识别右下角姓名并匹配/创建成员</option>
+        <option value="">正在加载成员...</option>
+      </select>
+    </label>
+    <label class="hidden" data-auto-department>
+      新成员默认部门
+      <input name="auto_department" value="待设置">
+    </label>
+    {% if target_user %}
+    <div class="selected-member-note">
+      <span>当前选择</span>
+      <strong>{{ target_user.name }}</strong>
+      <small>{{ target_user.department }} · {{ target_user.student_id or '未填写学号' }}</small>
+    </div>
+    {% endif %}
+  </div>
+  <label class="drop-zone" data-drop-zone>
+    <input type="file" name="file" accept=".png,.jpg,.jpeg,.bmp,.webp,image/*" required>
+    <span class="drop-title">选择课表图片</span>
+    <span class="drop-note">支持 PNG、JPG、BMP、WEBP，最大 10 MB</span>
+  </label>
+  <div class="preview-frame hidden" data-preview-frame>
+    <img data-preview alt="课表预览">
+  </div>
+  <p class="form-error" data-form-error></p>
+  <div class="form-actions">
+    <button class="button primary" type="submit" data-submit>上传并识别</button>
+  </div>
+</form>
+{% endblock %}
+{% block scripts %}
+<script>
+const preselectedUserId = {{ target_user.id if target_user else "null" }};
+const form = document.querySelector("[data-upload-form]");
+const memberSelect = form.querySelector("[data-member-select]");
+const fileInput = form.querySelector("input[type='file']");
+const previewFrame = document.querySelector("[data-preview-frame]");
+const preview = document.querySelector("[data-preview]");
+const dropZone = document.querySelector("[data-drop-zone]");
+
+async function loadMembers() {
+  const result = await API.request("/api/users");
+  if (!result.ok) {
+    memberSelect.innerHTML = `<option value="">${API.escapeHtml(result.message)}</option>`;
+    return;
+  }
+  const members = result.users.filter((user) => user.role !== "admin");
+  memberSelect.innerHTML = '<option value="__auto__">自动识别右下角姓名并匹配/创建成员</option><option value="">请选择成员</option>' + members.map((user) => `
+    <option value="${user.id}" ${user.id === preselectedUserId ? "selected" : ""}>
+      ${API.escapeHtml(user.department)} · ${API.escapeHtml(user.name)}${user.student_id ? `（${API.escapeHtml(user.student_id)}）` : ""}
+    </option>
+  `).join("");
+  if (!members.length) {
+    memberSelect.innerHTML = '<option value="__auto__">自动识别右下角姓名并创建成员</option>';
+  }
+  memberSelect.value = members.some((user) => user.id === preselectedUserId)
+    ? String(preselectedUserId)
+    : "__auto__";
+  toggleAutoDepartment();
+}
+
+function toggleAutoDepartment() {
+  document.querySelector("[data-auto-department]").classList.toggle(
+    "hidden",
+    memberSelect.value !== "__auto__"
+  );
+}
+
+function showPreview(file) {
+  if (!file) return;
+  preview.src = URL.createObjectURL(file);
+  previewFrame.classList.remove("hidden");
+}
+
+fileInput.addEventListener("change", () => showPreview(fileInput.files[0]));
+memberSelect.addEventListener("change", toggleAutoDepartment);
+["dragenter", "dragover"].forEach((eventName) => {
+  dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    dropZone.classList.add("dragging");
+  });
+});
+["dragleave", "drop"].forEach((eventName) => {
+  dropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("dragging");
+  });
+});
+dropZone.addEventListener("drop", (event) => {
+  const files = event.dataTransfer.files;
+  if (!files.length) return;
+  fileInput.files = files;
+  showPreview(files[0]);
+});
+
+form.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const errorBox = form.querySelector("[data-form-error]");
+  const submitButton = form.querySelector("[data-submit]");
+  errorBox.textContent = "";
+  submitButton.disabled = true;
+  submitButton.textContent = "正在识别...";
+  const body = new FormData(form);
+  const selectedMember = body.get("target_user_id");
+  body.delete("target_user_id");
+  if (selectedMember === "__auto__") {
+    body.append("auto_owner", "1");
+    body.append("auto_department", form.elements.auto_department.value || "待设置");
+  } else {
+    body.append("target_user_id", selectedMember);
+  }
+  const result = await API.request("/api/schedules/upload", { method: "POST", body });
+  submitButton.disabled = false;
+  submitButton.textContent = "上传并识别";
+  if (result.ok) {
+    API.toast(result.message);
+    window.location.href = result.review_url;
+  } else {
+    errorBox.textContent = result.message;
+  }
+});
+
+loadMembers();
+</script>
+{% endblock %}

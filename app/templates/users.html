@@ -1,0 +1,237 @@
+{% extends "base.html" %}
+{% block title %}成员管理 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">组织信息</p>
+    <h1>成员管理</h1>
+  </div>
+  {% if current_user.role == User.ROLE_ADMIN %}
+  <button class="button primary" type="button" data-toggle-create>新增成员</button>
+  {% endif %}
+</section>
+
+{% if current_user.role == User.ROLE_ADMIN %}
+<form class="tool-panel hidden" data-create-form>
+  <div class="form-grid three">
+    <label>姓名<input name="name" required></label>
+    <label>学号/工号<input name="student_id"></label>
+    <label>部门<input name="department" required></label>
+    <label>用户名<input name="username" placeholder="留空则自动生成"></label>
+    <label>初始密码<input name="password" type="password" minlength="6" placeholder="管理员账号必填"></label>
+    <label>
+      角色
+      <select name="role">
+        <option value="member">普通成员</option>
+        <option value="leader">负责人</option>
+        <option value="admin">管理员</option>
+      </select>
+    </label>
+  </div>
+  <p class="form-error" data-create-error></p>
+  <div class="form-actions">
+    <button class="button primary" type="submit">创建成员</button>
+  </div>
+</form>
+
+<form class="tool-panel hidden" data-edit-form>
+  <input type="hidden" name="user_id">
+  <div class="form-heading">
+    <h2>编辑账号</h2>
+    <button class="text-button" type="button" data-cancel-edit>取消</button>
+  </div>
+  <div class="form-grid three">
+    <label>姓名<input name="name" required></label>
+    <label>学号/工号<input name="student_id"></label>
+    <label>部门<input name="department" required></label>
+    <label>用户名<input name="username" required></label>
+    <label>新密码<input name="password" type="password" minlength="6" placeholder="可选，留空则不修改"></label>
+    <label>
+      角色
+      <select name="role">
+        <option value="member">普通成员</option>
+        <option value="leader">负责人</option>
+        <option value="admin">管理员</option>
+      </select>
+    </label>
+  </div>
+  <p class="form-error" data-edit-error></p>
+  <div class="form-actions">
+    <button class="button primary" type="submit">保存修改</button>
+  </div>
+</form>
+{% endif %}
+
+<div class="table-toolbar">
+  <label class="search-field">
+    <input type="search" placeholder="搜索姓名、学号、用户名或部门" data-search>
+  </label>
+  <span class="muted"><strong data-user-count>0</strong> 名成员</span>
+</div>
+
+<div class="table-wrap">
+  <table class="data-table">
+    <thead>
+      <tr>
+        <th>姓名</th>
+        <th>学号/工号</th>
+        <th>用户名</th>
+        <th>部门</th>
+        <th>角色</th>
+        <th>课程</th>
+        <th>录入时间</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody data-user-body>
+      <tr><td colspan="8" class="empty-cell">正在加载...</td></tr>
+    </tbody>
+  </table>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+const currentUserId = {{ current_user.id }};
+const isAdmin = {{ "true" if current_user.role == User.ROLE_ADMIN else "false" }};
+let searchTimer = null;
+let loadedUsers = new Map();
+
+function renderActions(user) {
+  if (!isAdmin) {
+    return '<span class="muted">仅查看</span>';
+  }
+  const isSelf = user.id === currentUserId;
+  return `
+    <div class="row-actions">
+      <a class="text-button" href="/admin/users/${user.id}/schedule">课表</a>
+      <button class="text-button" type="button" data-edit-user="${user.id}">编辑</button>
+      <button class="text-button danger" type="button" data-delete-user="${user.id}" ${isSelf ? "disabled" : ""}>${isSelf ? "当前账号" : "删除"}</button>
+    </div>
+  `;
+}
+
+async function loadUsers(keyword = "") {
+  const result = await API.request(`/api/users?keyword=${encodeURIComponent(keyword)}`);
+  const body = document.querySelector("[data-user-body]");
+  if (!result.ok) {
+    body.innerHTML = `<tr><td colspan="8" class="empty-cell">${API.escapeHtml(result.message)}</td></tr>`;
+    return;
+  }
+  loadedUsers = new Map(result.users.map((user) => [user.id, user]));
+  document.querySelector("[data-user-count]").textContent = result.users.length;
+  body.innerHTML = result.users.map((user) => `
+    <tr>
+      <td><strong>${API.escapeHtml(user.name)}</strong></td>
+      <td>${API.escapeHtml(user.student_id || "-")}</td>
+      <td>${API.escapeHtml(user.username)}</td>
+      <td>${API.escapeHtml(user.department)}</td>
+      <td><span class="role-badge role-${API.escapeHtml(user.role)}">${API.escapeHtml(user.role_label)}</span></td>
+      <td>${Number(user.course_count || 0)}</td>
+      <td>${API.escapeHtml(user.created_at.replace("T", " "))}</td>
+      <td>${renderActions(user)}</td>
+    </tr>
+  `).join("") || '<tr><td colspan="8" class="empty-cell">没有匹配的成员</td></tr>';
+}
+
+document.querySelector("[data-search]").addEventListener("input", (event) => {
+  clearTimeout(searchTimer);
+  searchTimer = setTimeout(() => loadUsers(event.target.value.trim()), 250);
+});
+
+const createForm = document.querySelector("[data-create-form]");
+const editForm = document.querySelector("[data-edit-form]");
+
+if (createForm) {
+  document.querySelector("[data-toggle-create]").addEventListener("click", () => {
+    editForm.classList.add("hidden");
+    createForm.classList.toggle("hidden");
+  });
+  createForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const errorBox = createForm.querySelector("[data-create-error]");
+    const button = createForm.querySelector("button[type='submit']");
+    errorBox.textContent = "";
+    button.disabled = true;
+    const result = await API.request("/api/users", {
+      method: "POST",
+      body: JSON.stringify(Object.fromEntries(new FormData(createForm)))
+    });
+    button.disabled = false;
+    if (result.ok) {
+      API.toast(result.message);
+      createForm.reset();
+      createForm.classList.add("hidden");
+      loadUsers();
+    } else {
+      errorBox.textContent = result.message;
+    }
+  });
+
+  editForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const errorBox = editForm.querySelector("[data-edit-error]");
+    const button = editForm.querySelector("button[type='submit']");
+    const payload = Object.fromEntries(new FormData(editForm));
+    const userId = payload.user_id;
+    delete payload.user_id;
+    if (!payload.password) delete payload.password;
+    errorBox.textContent = "";
+    button.disabled = true;
+    const result = await API.request(`/api/users/${userId}`, {
+      method: "PATCH",
+      body: JSON.stringify(payload)
+    });
+    button.disabled = false;
+    if (result.ok) {
+      API.toast(result.message);
+      editForm.classList.add("hidden");
+      loadUsers();
+    } else {
+      errorBox.textContent = result.message;
+    }
+  });
+
+  document.querySelector("[data-cancel-edit]").addEventListener("click", () => {
+    editForm.classList.add("hidden");
+  });
+}
+
+document.querySelector("[data-user-body]").addEventListener("click", async (event) => {
+  const editButton = event.target.closest("[data-edit-user]");
+  if (editButton) {
+    const user = loadedUsers.get(Number(editButton.dataset.editUser));
+    if (!user) return;
+    editForm.elements.user_id.value = user.id;
+    editForm.elements.name.value = user.name;
+    editForm.elements.student_id.value = user.student_id || "";
+    editForm.elements.department.value = user.department;
+    editForm.elements.username.value = user.username;
+    editForm.elements.password.value = "";
+    editForm.elements.role.value = user.role;
+    editForm.elements.role.disabled = user.id === currentUserId;
+    editForm.querySelector("[data-edit-error]").textContent = "";
+    createForm.classList.add("hidden");
+    editForm.classList.remove("hidden");
+    editForm.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+
+  const deleteButton = event.target.closest("[data-delete-user]");
+  if (!deleteButton || deleteButton.disabled) return;
+  const user = loadedUsers.get(Number(deleteButton.dataset.deleteUser));
+  if (!user || !window.confirm(`确定删除 ${user.name}（${user.username}）吗？该账号的课表和上传记录也会一并删除。`)) {
+    return;
+  }
+  const result = await API.request(`/api/users/${user.id}`, { method: "DELETE" });
+  if (result.ok) {
+    API.toast(result.message);
+    editForm.classList.add("hidden");
+    loadUsers();
+  } else {
+    API.toast(result.message, "error");
+  }
+});
+
+loadUsers();
+</script>
+{% endblock %}

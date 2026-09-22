@@ -1,0 +1,415 @@
+{% extends "base.html" %}
+{% block title %}批量上传课表 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">批量录入</p>
+    <h1>批量上传课表</h1>
+    <p class="muted" data-batch-summary>正在加载成员...</p>
+  </div>
+</section>
+
+<section class="tool-panel">
+  <label class="drop-zone batch-drop-zone" data-batch-drop-zone>
+    <input type="file" data-batch-input accept=".png,.jpg,.jpeg,.bmp,.webp,image/*" multiple>
+    <span class="drop-title">选择多张课表图片</span>
+    <span class="drop-note">可多选，也可以直接拖入；文件名包含成员姓名、学号或用户名时会自动匹配</span>
+  </label>
+  <p class="form-error" data-batch-error></p>
+</section>
+
+<div class="batch-auto-bar">
+  <label class="inline-checkbox">
+    <input type="checkbox" data-auto-owner checked>
+    <span>未指定成员时，识别图片右下角姓名并自动创建/匹配成员</span>
+  </label>
+  <label>
+    新成员默认部门
+    <input data-auto-department value="待设置">
+  </label>
+</div>
+
+<div class="table-toolbar">
+  <span><strong data-batch-count>0</strong> 张图片</span>
+  <span class="muted">单次最多 30 张</span>
+</div>
+
+<div class="table-wrap">
+  <table class="data-table batch-table">
+    <thead>
+      <tr>
+        <th>图片</th>
+        <th>所属成员</th>
+        <th>识别状态</th>
+        <th>操作</th>
+      </tr>
+    </thead>
+    <tbody data-batch-body>
+      <tr><td colspan="4" class="empty-cell">请选择要上传的课表图片</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<div class="form-actions batch-actions">
+  <button class="button secondary" type="button" data-batch-clear>清空列表</button>
+  <button class="button primary" type="button" data-batch-submit disabled>开始批量识别</button>
+</div>
+
+<section class="tool-panel hidden" data-batch-results>
+  <div class="form-heading">
+    <h2>识别结果</h2>
+    <span class="muted" data-batch-result-summary></span>
+  </div>
+  <div class="batch-result-list" data-batch-result-list></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const batchInput = document.querySelector("[data-batch-input]");
+const batchDropZone = document.querySelector("[data-batch-drop-zone]");
+const batchBody = document.querySelector("[data-batch-body]");
+const batchError = document.querySelector("[data-batch-error]");
+const batchSubmit = document.querySelector("[data-batch-submit]");
+const batchClear = document.querySelector("[data-batch-clear]");
+const autoOwnerToggle = document.querySelector("[data-auto-owner]");
+const autoDepartmentInput = document.querySelector("[data-auto-department]");
+const BATCH_STORAGE_KEY = "kechuang.batch-upload.state.v1";
+let members = [];
+let batchItems = [];
+let isUploading = false;
+
+function normalizeMatchValue(value) {
+  return String(value || "").normalize("NFKC").toLowerCase().replace(/\s+/g, "");
+}
+
+function itemFilename(item) {
+  return item.file?.name || item.filename || "";
+}
+
+function itemFileSize(item) {
+  return item.file?.size || item.fileSize || 0;
+}
+
+function persistBatchState() {
+  try {
+    const snapshot = batchItems.map((item) => ({
+      filename: itemFilename(item),
+      fileSize: itemFileSize(item),
+      lastModified: item.file?.lastModified || item.lastModified || 0,
+      memberId: item.memberId || "",
+      status: item.status,
+      message: item.message || "",
+      reviewUrl: item.reviewUrl || "",
+      resolvedMember: item.resolvedMember || null
+    }));
+    sessionStorage.setItem(BATCH_STORAGE_KEY, JSON.stringify(snapshot));
+  } catch (error) {
+    // Session storage may be unavailable in strict privacy modes.
+  }
+}
+
+function restoreBatchState() {
+  try {
+    const raw = sessionStorage.getItem(BATCH_STORAGE_KEY);
+    if (!raw) return;
+    const savedItems = JSON.parse(raw);
+    if (!Array.isArray(savedItems)) return;
+    batchItems = savedItems.map((item) => ({
+      file: null,
+      filename: item.filename,
+      fileSize: item.fileSize,
+      lastModified: item.lastModified,
+      memberId: item.memberId || "",
+      status: item.status === "done" ? "done" : "error",
+      message: item.status === "done"
+        ? item.message || ""
+        : "页面刷新后本地文件已释放，请重新选择此图片",
+      reviewUrl: item.reviewUrl || "",
+      resolvedMember: item.resolvedMember || null
+    }));
+  } catch (error) {
+    batchItems = [];
+  }
+}
+
+function matchMember(filename) {
+  const baseName = normalizeMatchValue(filename.replace(/\.[^.]+$/, ""));
+  let bestMember = null;
+  let bestScore = 0;
+  members.forEach((member) => {
+    [
+      [member.student_id, 1000],
+      [member.name, 600],
+      [member.username, 300]
+    ].forEach(([value, weight]) => {
+      const candidate = normalizeMatchValue(value);
+      if (!candidate || !baseName.includes(candidate)) return;
+      const score = weight + candidate.length;
+      if (score > bestScore) {
+        bestMember = member;
+        bestScore = score;
+      }
+    });
+  });
+  return bestMember;
+}
+
+function memberLabel(member) {
+  if (!member) return "未匹配";
+  return `${member.department} · ${member.name}`;
+}
+
+function memberOptions(selectedId) {
+  return '<option value="">留空并自动识别姓名</option>' + members.map((member) => `
+    <option value="${member.id}" ${String(member.id) === String(selectedId) ? "selected" : ""}>
+      ${API.escapeHtml(member.department)} · ${API.escapeHtml(member.name)}${member.student_id ? `（${API.escapeHtml(member.student_id)}）` : ""}
+    </option>
+  `).join("");
+}
+
+function statusLabel(item) {
+  if (item.status === "uploading") return "识别中...";
+  if (item.status === "done") return "识别完成";
+  if (item.status === "error") return "识别失败";
+  return "等待上传";
+}
+
+function statusClass(item) {
+  if (item.status === "done") return "success";
+  if (item.status === "error") return "error";
+  if (item.status === "uploading") return "working";
+  return "pending";
+}
+
+function renderBatch() {
+  document.querySelector("[data-batch-count]").textContent = batchItems.length;
+  const matchedCount = batchItems.filter((item) => item.memberId).length;
+  const autoCount = batchItems.filter((item) => !item.memberId).length;
+  document.querySelector("[data-batch-summary]").textContent = autoOwnerToggle.checked
+    ? `已选择 ${batchItems.length} 张图片，文件名匹配 ${matchedCount} 张，待自动识别姓名 ${autoCount} 张`
+    : `已选择 ${batchItems.length} 张图片，已指定 ${matchedCount} 张`;
+
+  batchBody.innerHTML = batchItems.map((item, index) => {
+    const member = item.resolvedMember ||
+      members.find((candidate) => String(candidate.id) === String(item.memberId));
+    const locked = item.status === "done" || item.status === "uploading";
+    let actionHtml = "";
+    if (item.reviewUrl && !isUploading) {
+      actionHtml = `<a class="text-button" href="${item.reviewUrl}">核对并保存</a>`;
+    } else if (item.reviewUrl) {
+      actionHtml = '<span class="muted">识别完成后可核对</span>';
+    } else {
+      actionHtml = `<button class="text-button danger" type="button" data-batch-remove="${index}" ${locked ? "disabled" : ""}>移除</button>`;
+    }
+    return `
+      <tr>
+        <td>
+          <strong>${API.escapeHtml(itemFilename(item))}</strong>
+          <small class="batch-file-size">${(itemFileSize(item) / 1024 / 1024).toFixed(2)} MB</small>
+        </td>
+        <td>
+          ${locked
+            ? `<span>${API.escapeHtml(memberLabel(member))}</span>`
+            : `<select data-batch-member="${index}">${memberOptions(item.memberId)}</select>`}
+        </td>
+        <td>
+          <span class="batch-status ${statusClass(item)}">${statusLabel(item)}</span>
+          ${item.message ? `<small class="batch-message">${API.escapeHtml(item.message)}</small>` : ""}
+        </td>
+        <td>
+          ${actionHtml}
+        </td>
+      </tr>
+    `;
+  }).join("") || '<tr><td colspan="4" class="empty-cell">请选择要上传的课表图片</td></tr>';
+
+  batchSubmit.disabled = isUploading || !batchItems.length ||
+    batchItems.every((item) => item.status === "done");
+  batchClear.disabled = isUploading || !batchItems.length;
+  batchInput.disabled = isUploading;
+  persistBatchState();
+}
+
+function addFiles(fileList) {
+  batchError.textContent = "";
+  const existing = new Set(
+    batchItems.map((item) =>
+      `${itemFilename(item)}:${itemFileSize(item)}:${item.file?.lastModified || item.lastModified || 0}`
+    )
+  );
+  Array.from(fileList).forEach((file) => {
+    if (
+      !file.type.startsWith("image/") &&
+      !/\.(png|jpe?g|bmp|webp)$/i.test(file.name)
+    ) {
+      batchError.textContent = `${file.name} 不是图片文件`;
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      batchError.textContent = `${file.name} 超过 10 MB`;
+      return;
+    }
+    const key = `${file.name}:${file.size}:${file.lastModified}`;
+    if (existing.has(key)) return;
+    if (batchItems.length >= 30) {
+      batchError.textContent = "单次最多选择 30 张图片";
+      return;
+    }
+    existing.add(key);
+    const matched = matchMember(file.name);
+    batchItems.push({
+      file,
+      filename: file.name,
+      fileSize: file.size,
+      lastModified: file.lastModified,
+      memberId: matched ? matched.id : "",
+      status: "pending",
+      message: "",
+      reviewUrl: ""
+    });
+  });
+  batchInput.value = "";
+  renderBatch();
+}
+
+async function loadMembers() {
+  const result = await API.request("/api/users");
+  if (!result.ok) {
+    batchError.textContent = result.message;
+    return;
+  }
+  members = result.users.filter((user) => user.role !== "admin");
+  batchItems.forEach((item) => {
+    if (!item.memberId) {
+      const matched = matchMember(itemFilename(item));
+      item.memberId = matched ? matched.id : "";
+    }
+  });
+  renderBatch();
+  renderResults();
+}
+
+async function submitBatch() {
+  batchError.textContent = "";
+  const missingMember = autoOwnerToggle.checked
+    ? null
+    : batchItems.find((item) => !item.memberId);
+  if (missingMember) {
+    batchError.textContent = `请选择 ${itemFilename(missingMember)} 的所属成员`;
+    return;
+  }
+
+  isUploading = true;
+  renderBatch();
+  for (const item of batchItems) {
+    if (item.status === "done") continue;
+    if (!item.file) {
+      item.status = "error";
+      item.message = "页面刷新后本地文件已释放，请重新选择此图片";
+      renderBatch();
+      continue;
+    }
+    item.status = "uploading";
+    item.message = "";
+    renderBatch();
+    const body = new FormData();
+    body.append("file", item.file);
+    if (item.memberId) {
+      body.append("target_user_id", item.memberId);
+    } else {
+      body.append("auto_owner", "1");
+      body.append("auto_department", autoDepartmentInput.value.trim() || "待设置");
+    }
+    const result = await API.request("/api/schedules/upload", {
+      method: "POST",
+      body
+    });
+    if (result.ok) {
+      item.status = "done";
+      item.reviewUrl = `${result.review_url}?next=/batch-upload`;
+      item.resolvedMember = result.user;
+      const ownerText = result.owner_detection?.name
+        ? `课表主人：${result.owner_detection.name}；`
+        : "";
+      item.message =
+        `${ownerText}提取 ${result.draft_courses?.length || 0} 条课程`;
+    } else {
+      item.status = "error";
+      item.message = result.message;
+    }
+    renderBatch();
+  }
+
+  isUploading = false;
+  renderBatch();
+  renderResults();
+}
+
+function renderResults() {
+  const panel = document.querySelector("[data-batch-results]");
+  const list = document.querySelector("[data-batch-result-list]");
+  const successCount = batchItems.filter((item) => item.status === "done").length;
+  const errorCount = batchItems.filter((item) => item.status === "error").length;
+  if (!successCount && !errorCount) return;
+  panel.classList.remove("hidden");
+  document.querySelector("[data-batch-result-summary]").textContent =
+    `成功 ${successCount} 张，失败 ${errorCount} 张`;
+  list.innerHTML = batchItems.map((item) => {
+    const member = item.resolvedMember ||
+      members.find((candidate) => String(candidate.id) === String(item.memberId));
+    return `
+      <div class="batch-result-item">
+        <span>
+          <strong>${API.escapeHtml(itemFilename(item))}</strong>
+          <small>${API.escapeHtml(memberLabel(member))}</small>
+        </span>
+        ${item.reviewUrl
+          ? `<a class="button secondary" href="${item.reviewUrl}">核对并保存</a>`
+          : `<span class="form-error">${API.escapeHtml(item.message || "识别失败")}</span>`}
+      </div>
+    `;
+  }).join("");
+}
+
+batchInput.addEventListener("change", () => addFiles(batchInput.files));
+["dragenter", "dragover"].forEach((eventName) => {
+  batchDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    batchDropZone.classList.add("dragging");
+  });
+});
+["dragleave", "drop"].forEach((eventName) => {
+  batchDropZone.addEventListener(eventName, (event) => {
+    event.preventDefault();
+    batchDropZone.classList.remove("dragging");
+  });
+});
+batchDropZone.addEventListener("drop", (event) => addFiles(event.dataTransfer.files));
+
+batchBody.addEventListener("change", (event) => {
+  const select = event.target.closest("[data-batch-member]");
+  if (!select) return;
+  batchItems[Number(select.dataset.batchMember)].memberId = select.value;
+  renderBatch();
+});
+
+batchBody.addEventListener("click", (event) => {
+  const button = event.target.closest("[data-batch-remove]");
+  if (!button || button.disabled) return;
+  batchItems.splice(Number(button.dataset.batchRemove), 1);
+  renderBatch();
+});
+
+batchSubmit.addEventListener("click", submitBatch);
+batchClear.addEventListener("click", () => {
+  if (isUploading || !batchItems.length) return;
+  batchItems = [];
+  sessionStorage.removeItem(BATCH_STORAGE_KEY);
+  renderBatch();
+  renderResults();
+});
+autoOwnerToggle.addEventListener("change", renderBatch);
+restoreBatchState();
+loadMembers();
+</script>
+{% endblock %}

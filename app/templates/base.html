@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if csrf_token %}<meta name="csrf-token" content="{{ csrf_token }}">{% endif %}
+  <title>{% block title %}科创实践中心管理系统{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+  {% if current_user %}
+  <header class="topbar">
+    <a class="brand" href="{{ url_for('views.dashboard') }}">
+      <span class="brand-mark">科创</span>
+      <span class="brand-text">大学生科创实践中心管理系统</span>
+    </a>
+    <button class="nav-toggle" type="button" aria-label="展开导航" data-nav-toggle>菜单</button>
+    <nav class="main-nav" data-main-nav>
+      <a class="{{ 'active' if request.endpoint == 'views.dashboard' else '' }}" href="{{ url_for('views.dashboard') }}">首页</a>
+      <div class="nav-group {{ 'active' if request.endpoint in ['views.upload', 'views.batch_upload', 'views.query', 'views.summary'] else '' }}" data-nav-group>
+        <button class="nav-group-toggle" type="button" aria-haspopup="true" aria-expanded="false" data-nav-group-toggle>
+          课表管理
+          <span aria-hidden="true">⌄</span>
+        </button>
+        <div class="nav-submenu">
+          <a class="{{ 'active' if request.endpoint == 'views.upload' else '' }}" href="{{ url_for('views.upload') }}">上传课表</a>
+          <a class="{{ 'active' if request.endpoint == 'views.batch_upload' else '' }}" href="{{ url_for('views.batch_upload') }}">批量上传</a>
+          <a class="{{ 'active' if request.endpoint == 'views.query' else '' }}" href="{{ url_for('views.query') }}">无课查询</a>
+          <a class="{{ 'active' if request.endpoint == 'views.summary' else '' }}" href="{{ url_for('views.summary') }}">汇总导出</a>
+        </div>
+      </div>
+      <a class="{{ 'active' if request.endpoint == 'views.materials' else '' }}" href="{{ url_for('views.materials') }}">部门资料</a>
+      <a class="{{ 'active' if request.endpoint == 'views.todos' else '' }}" href="{{ url_for('views.todos') }}">待办事项</a>
+      <a class="{{ 'active' if request.endpoint in ['views.users', 'views.admin_user_schedule'] else '' }}" href="{{ url_for('views.users') }}">成员管理</a>
+      <button class="nav-logout" type="button" data-logout>退出</button>
+    </nav>
+  </header>
+  {% endif %}
+
+  <main class="{% if current_user %}page-shell{% else %}auth-shell{% endif %}">
+    {% block content %}{% endblock %}
+  </main>
+
+  <div class="toast" data-toast role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='js/common.js') }}"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

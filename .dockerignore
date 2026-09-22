@@ -1,0 +1,13 @@
+.git
+.env
+.env.production
+.venv
+__pycache__
+*.pyc
+.pytest_cache
+backups
+instance
+tests
+lsq的课表.jpg
+lsq的课表（裁剪版）.png
+

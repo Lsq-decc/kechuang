@@ -1,0 +1,221 @@
+{% extends "base.html" %}
+{% block title %}待办事项 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">工作安排</p>
+    <h1>待办事项</h1>
+    <p class="muted">记录和管理自己的待办，区分完成状态，并按重要程度排序。</p>
+  </div>
+</section>
+
+<section class="todo-layout">
+  <form class="tool-panel todo-create-panel" data-todo-form>
+    <div class="form-heading">
+      <h2>添加待办</h2>
+    </div>
+    <label>
+      待办内容
+      <input name="title" maxlength="200" placeholder="例如：整理本周活动照片" required>
+    </label>
+    <label>
+      重要程度
+      <select name="priority">
+        <option value="high">重要</option>
+        <option value="medium" selected>一般</option>
+        <option value="low">次要</option>
+      </select>
+    </label>
+    <label>
+      备注
+      <textarea name="note" maxlength="500" rows="4" placeholder="可选"></textarea>
+    </label>
+    <p class="form-error" data-todo-error></p>
+    <button class="button primary wide" type="submit">添加待办</button>
+  </form>
+
+  <section class="todo-panel">
+    <div class="todo-toolbar">
+      <div class="segmented" data-todo-status>
+        <button class="active" type="button" data-status="all">全部 <span data-count-all>0</span></button>
+        <button type="button" data-status="pending">未完成 <span data-count-pending>0</span></button>
+        <button type="button" data-status="completed">已完成 <span data-count-completed>0</span></button>
+      </div>
+      <label class="todo-sort">
+        排序
+        <select data-todo-sort>
+          <option value="priority">重要程度优先</option>
+          <option value="newest">最新添加</option>
+          <option value="oldest">最早添加</option>
+        </select>
+      </label>
+    </div>
+    <div class="todo-list" data-todo-list>
+      <div class="empty-state">正在加载...</div>
+    </div>
+  </section>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const todoState = {
+  status: "all",
+  sort: "priority"
+};
+const todoForm = document.querySelector("[data-todo-form]");
+const todoList = document.querySelector("[data-todo-list]");
+
+function todoRow(todo) {
+  return `
+    <article class="todo-item ${todo.is_completed ? "completed" : ""}" data-todo-id="${todo.id}">
+      <label class="todo-check" title="${todo.is_completed ? "标为未完成" : "标为已完成"}">
+        <input type="checkbox" data-toggle-todo="${todo.id}" ${todo.is_completed ? "checked" : ""}>
+        <span></span>
+      </label>
+      <div class="todo-content">
+        <strong>${API.escapeHtml(todo.title)}</strong>
+        ${todo.note ? `<p>${API.escapeHtml(todo.note)}</p>` : ""}
+        <small>添加于 ${API.escapeHtml(todo.created_at.replace("T", " "))}${todo.completed_at ? ` · 完成于 ${API.escapeHtml(todo.completed_at.replace("T", " "))}` : ""}</small>
+      </div>
+      <div class="todo-actions">
+        <select class="priority-select priority-${todo.priority}" data-todo-priority="${todo.id}" aria-label="重要程度">
+          <option value="high" ${todo.priority === "high" ? "selected" : ""}>重要</option>
+          <option value="medium" ${todo.priority === "medium" ? "selected" : ""}>一般</option>
+          <option value="low" ${todo.priority === "low" ? "selected" : ""}>次要</option>
+        </select>
+        <button class="text-button danger" type="button" data-delete-todo="${todo.id}">删除</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderTodos(todos) {
+  if (!todos.length) {
+    const label = todoState.status === "completed"
+      ? "还没有已完成的待办"
+      : (todoState.status === "pending" ? "没有未完成的待办" : "还没有添加待办");
+    todoList.innerHTML = `<div class="empty-state">${label}</div>`;
+    return;
+  }
+
+  if (todoState.status !== "all") {
+    todoList.innerHTML = todos.map(todoRow).join("");
+    return;
+  }
+
+  const pending = todos.filter((todo) => !todo.is_completed);
+  const completed = todos.filter((todo) => todo.is_completed);
+  todoList.innerHTML = [
+    pending.length ? `<p class="todo-section-label">未完成</p>${pending.map(todoRow).join("")}` : "",
+    completed.length ? `<p class="todo-section-label">已完成</p>${completed.map(todoRow).join("")}` : ""
+  ].join("");
+}
+
+async function loadTodos() {
+  const params = new URLSearchParams({
+    status: todoState.status,
+    sort: todoState.sort
+  });
+  const result = await API.request(`/api/todos?${params.toString()}`);
+  if (!result.ok) {
+    todoList.innerHTML = `<div class="empty-state">${API.escapeHtml(result.message)}</div>`;
+    return;
+  }
+  document.querySelector("[data-count-all]").textContent = result.counts.total;
+  document.querySelector("[data-count-pending]").textContent = result.counts.pending;
+  document.querySelector("[data-count-completed]").textContent = result.counts.completed;
+  renderTodos(result.todos);
+}
+
+todoForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = todoForm.querySelector("[data-todo-error]");
+  const button = todoForm.querySelector("button[type='submit']");
+  error.textContent = "";
+  button.disabled = true;
+  const payload = Object.fromEntries(new FormData(todoForm));
+  const result = await API.request("/api/todos", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+  button.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    todoForm.reset();
+    todoForm.elements.priority.value = "medium";
+    loadTodos();
+  } else {
+    error.textContent = result.message;
+  }
+});
+
+document.querySelector("[data-todo-status]").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-status]");
+  if (!button) return;
+  todoState.status = button.dataset.status;
+  document.querySelectorAll("[data-status]").forEach((item) => {
+    item.classList.toggle("active", item === button);
+  });
+  loadTodos();
+});
+
+document.querySelector("[data-todo-sort]").addEventListener("change", (event) => {
+  todoState.sort = event.target.value;
+  loadTodos();
+});
+
+todoList.addEventListener("change", async (event) => {
+  const toggle = event.target.closest("[data-toggle-todo]");
+  if (toggle) {
+    toggle.disabled = true;
+    const result = await API.request(`/api/todos/${toggle.dataset.toggleTodo}`, {
+      method: "PATCH",
+      body: JSON.stringify({ is_completed: toggle.checked })
+    });
+    toggle.disabled = false;
+    if (result.ok) {
+      API.toast(result.message);
+      loadTodos();
+    } else {
+      toggle.checked = !toggle.checked;
+      API.toast(result.message, "error");
+    }
+    return;
+  }
+
+  const priority = event.target.closest("[data-todo-priority]");
+  if (!priority) return;
+  priority.disabled = true;
+  const result = await API.request(`/api/todos/${priority.dataset.todoPriority}`, {
+    method: "PATCH",
+    body: JSON.stringify({ priority: priority.value })
+  });
+  priority.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    if (todoState.sort === "priority") loadTodos();
+  } else {
+    API.toast(result.message, "error");
+  }
+});
+
+todoList.addEventListener("click", async (event) => {
+  const button = event.target.closest("[data-delete-todo]");
+  if (!button) return;
+  if (!window.confirm("确定删除这条待办吗？")) return;
+  button.disabled = true;
+  const result = await API.request(`/api/todos/${button.dataset.deleteTodo}`, {
+    method: "DELETE"
+  });
+  if (result.ok) {
+    API.toast(result.message);
+    loadTodos();
+  } else {
+    button.disabled = false;
+    API.toast(result.message, "error");
+  }
+});
+
+loadTodos();
+</script>
+{% endblock %}

@@ -1,0 +1,305 @@
+{% extends "base.html" %}
+{% block title %}部门资料库 | 科创实践中心管理系统{% endblock %}
+{% block content %}
+<section class="page-heading compact">
+  <div>
+    <p class="eyebrow">资料管理</p>
+    <h1>部门资料库</h1>
+    <p class="muted">三个部门分别存放资料，可新建多级文件夹并上传照片、文档等文件。</p>
+  </div>
+  <div class="heading-actions">
+    <button class="button secondary" type="button" data-toggle-folder>新建文件夹</button>
+    <button class="button primary" type="button" data-toggle-upload>上传文件</button>
+  </div>
+</section>
+
+<nav class="material-space-tabs" data-space-tabs aria-label="部门资料空间">
+  {% for department in departments %}
+  <button type="button" data-department="{{ department }}">{{ department }}</button>
+  {% endfor %}
+</nav>
+
+<section class="material-workspace">
+  <div class="material-commandbar">
+    <div class="material-breadcrumbs" data-breadcrumbs>
+      <span class="muted">正在加载...</span>
+    </div>
+    <span class="muted" data-material-summary></span>
+  </div>
+
+  <form class="tool-panel hidden" data-folder-form>
+    <div class="form-heading">
+      <h2>新建文件夹</h2>
+      <button class="text-button" type="button" data-cancel-folder>取消</button>
+    </div>
+    <div class="compact-form-row">
+      <label>
+        文件夹名称
+        <input name="name" maxlength="100" placeholder="例如：活动照片" required>
+      </label>
+      <button class="button primary" type="submit">创建</button>
+    </div>
+    <p class="form-error" data-folder-error></p>
+  </form>
+
+  <form class="tool-panel hidden" data-upload-form>
+    <div class="form-heading">
+      <h2>上传到当前文件夹</h2>
+      <button class="text-button" type="button" data-cancel-upload>取消</button>
+    </div>
+    <label class="material-upload-field">
+      选择文件
+      <input type="file" name="files" multiple data-file-input required>
+      <span class="muted" data-file-selection>支持照片、PDF、Office 文档及常见压缩包，可一次选择多个文件</span>
+    </label>
+    <p class="form-error" data-upload-error></p>
+    <div class="form-actions">
+      <button class="button primary" type="submit">开始上传</button>
+    </div>
+  </form>
+
+  <div class="material-list" data-material-list>
+    <div class="empty-state">正在加载资料...</div>
+  </div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+const state = {
+  department: {{ departments[0]|tojson }},
+  folderId: ""
+};
+const folderForm = document.querySelector("[data-folder-form]");
+const uploadForm = document.querySelector("[data-upload-form]");
+const fileInput = uploadForm.querySelector("[data-file-input]");
+const materialList = document.querySelector("[data-material-list]");
+
+function formatFileSize(bytes) {
+  const value = Number(bytes || 0);
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  if (value < 1024 * 1024 * 1024) return `${(value / 1024 / 1024).toFixed(1)} MB`;
+  return `${(value / 1024 / 1024 / 1024).toFixed(1)} GB`;
+}
+
+function renderBreadcrumbs(payload) {
+  const root = `<button class="material-crumb" type="button" data-folder-nav="">${API.escapeHtml(payload.department)}</button>`;
+  const crumbs = (payload.breadcrumbs || []).map((folder) =>
+    `<button class="material-crumb" type="button" data-folder-nav="${folder.id}">${API.escapeHtml(folder.name)}</button>`
+  );
+  document.querySelector("[data-breadcrumbs]").innerHTML = [root, ...crumbs].join("<span>/</span>");
+}
+
+function fileMark(file) {
+  if (file.is_image) {
+    return `<span class="material-file-preview"><img loading="lazy" src="${API.escapeHtml(file.content_url)}?inline=1" alt=""></span>`;
+  }
+  const label = file.extension ? file.extension.slice(0, 5).toUpperCase() : "FILE";
+  return `<span class="material-file-mark">${API.escapeHtml(label)}</span>`;
+}
+
+function renderMaterials(payload) {
+  renderBreadcrumbs(payload);
+  document.querySelector("[data-material-summary]").textContent =
+    `${payload.folders.length} 个文件夹 · ${payload.files.length} 个文件`;
+  document.querySelectorAll("[data-department]").forEach((button) => {
+    button.classList.toggle("active", button.dataset.department === payload.department);
+  });
+
+  const foldersHtml = payload.folders.map((folder) => `
+    <div class="material-item material-folder">
+      <button class="material-open-button" type="button" data-open-folder="${folder.id}">
+        <span class="material-folder-mark">DIR</span>
+        <span class="material-item-main">
+          <strong>${API.escapeHtml(folder.name)}</strong>
+          <small>${folder.folder_count} 个子文件夹 · ${folder.file_count} 个文件</small>
+        </span>
+      </button>
+      <button class="text-button danger" type="button" data-delete-folder="${folder.id}" data-folder-name="${API.escapeHtml(folder.name)}">删除</button>
+    </div>
+  `).join("");
+
+  const filesHtml = payload.files.map((file) => `
+    <div class="material-item">
+      ${fileMark(file)}
+      <span class="material-item-main">
+        <strong title="${API.escapeHtml(file.original_filename)}">${API.escapeHtml(file.original_filename)}</strong>
+        <small>${formatFileSize(file.file_size)} · ${API.escapeHtml(file.created_at.replace("T", " "))}</small>
+      </span>
+      <span class="material-file-actions">
+        <a class="text-button" href="${API.escapeHtml(file.content_url)}?download=1">下载</a>
+        ${file.is_image ? `<a class="text-button" href="${API.escapeHtml(file.content_url)}?inline=1" target="_blank" rel="noopener">查看</a>` : ""}
+        <button class="text-button danger" type="button" data-delete-file="${file.id}" data-file-name="${API.escapeHtml(file.original_filename)}">删除</button>
+      </span>
+    </div>
+  `).join("");
+
+  materialList.innerHTML = foldersHtml + filesHtml ||
+    '<div class="empty-state">当前文件夹为空，可新建文件夹或上传文件。</div>';
+}
+
+async function loadMaterials() {
+  const params = new URLSearchParams({ department: state.department });
+  if (state.folderId) params.set("folder_id", state.folderId);
+  const result = await API.request(`/api/materials?${params.toString()}`);
+  if (!result.ok) {
+    materialList.innerHTML = `<div class="empty-state">${API.escapeHtml(result.message)}</div>`;
+    return;
+  }
+  renderMaterials(result);
+}
+
+document.querySelector("[data-space-tabs]").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-department]");
+  if (!button || button.dataset.department === state.department) return;
+  state.department = button.dataset.department;
+  state.folderId = "";
+  folderForm.classList.add("hidden");
+  uploadForm.classList.add("hidden");
+  loadMaterials();
+});
+
+document.querySelector("[data-toggle-folder]").addEventListener("click", () => {
+  uploadForm.classList.add("hidden");
+  folderForm.classList.toggle("hidden");
+  if (!folderForm.classList.contains("hidden")) folderForm.elements.name.focus();
+});
+
+document.querySelector("[data-toggle-upload]").addEventListener("click", () => {
+  folderForm.classList.add("hidden");
+  uploadForm.classList.toggle("hidden");
+});
+
+document.querySelector("[data-cancel-folder]").addEventListener("click", () => {
+  folderForm.classList.add("hidden");
+  folderForm.reset();
+});
+
+document.querySelector("[data-cancel-upload]").addEventListener("click", () => {
+  uploadForm.classList.add("hidden");
+  uploadForm.reset();
+  document.querySelector("[data-file-selection]").textContent =
+    "支持照片、PDF、Office 文档及常见压缩包，可一次选择多个文件";
+});
+
+folderForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = folderForm.querySelector("[data-folder-error]");
+  const button = folderForm.querySelector("button[type='submit']");
+  error.textContent = "";
+  button.disabled = true;
+  const result = await API.request("/api/materials/folders", {
+    method: "POST",
+    body: JSON.stringify({
+      department: state.department,
+      parent_id: state.folderId || null,
+      name: folderForm.elements.name.value
+    })
+  });
+  button.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    folderForm.reset();
+    folderForm.classList.add("hidden");
+    loadMaterials();
+  } else {
+    error.textContent = result.message;
+  }
+});
+
+fileInput.addEventListener("change", () => {
+  const count = fileInput.files.length;
+  const size = Array.from(fileInput.files).reduce((total, file) => total + file.size, 0);
+  document.querySelector("[data-file-selection]").textContent = count
+    ? `已选择 ${count} 个文件，共 ${formatFileSize(size)}`
+    : "支持照片、PDF、Office 文档及常见压缩包，可一次选择多个文件";
+});
+
+uploadForm.addEventListener("submit", async (event) => {
+  event.preventDefault();
+  const error = uploadForm.querySelector("[data-upload-error]");
+  const button = uploadForm.querySelector("button[type='submit']");
+  if (!fileInput.files.length) {
+    error.textContent = "请选择要上传的文件";
+    return;
+  }
+  error.textContent = "";
+  button.disabled = true;
+  const formData = new FormData();
+  formData.append("department", state.department);
+  if (state.folderId) formData.append("folder_id", state.folderId);
+  Array.from(fileInput.files).forEach((file) => formData.append("files", file));
+  const result = await API.request("/api/materials/files", {
+    method: "POST",
+    body: formData
+  });
+  button.disabled = false;
+  if (result.ok) {
+    API.toast(result.message);
+    uploadForm.reset();
+    uploadForm.classList.add("hidden");
+    document.querySelector("[data-file-selection]").textContent =
+      "支持照片、PDF、Office 文档及常见压缩包，可一次选择多个文件";
+    loadMaterials();
+  } else {
+    error.textContent = result.message;
+  }
+});
+
+document.querySelector("[data-breadcrumbs]").addEventListener("click", (event) => {
+  const button = event.target.closest("[data-folder-nav]");
+  if (!button) return;
+  state.folderId = button.dataset.folderNav;
+  folderForm.classList.add("hidden");
+  uploadForm.classList.add("hidden");
+  loadMaterials();
+});
+
+materialList.addEventListener("click", async (event) => {
+  const openFolder = event.target.closest("[data-open-folder]");
+  if (openFolder) {
+    state.folderId = openFolder.dataset.openFolder;
+    folderForm.classList.add("hidden");
+    uploadForm.classList.add("hidden");
+    loadMaterials();
+    return;
+  }
+
+  const deleteFolder = event.target.closest("[data-delete-folder]");
+  if (deleteFolder) {
+    const name = deleteFolder.dataset.folderName;
+    if (!window.confirm(`确定删除文件夹“${name}”及其中的全部内容吗？`)) return;
+    deleteFolder.disabled = true;
+    const result = await API.request(`/api/materials/folders/${deleteFolder.dataset.deleteFolder}`, {
+      method: "DELETE"
+    });
+    if (result.ok) {
+      API.toast(result.message);
+      loadMaterials();
+    } else {
+      deleteFolder.disabled = false;
+      API.toast(result.message, "error");
+    }
+    return;
+  }
+
+  const deleteFile = event.target.closest("[data-delete-file]");
+  if (!deleteFile) return;
+  const name = deleteFile.dataset.fileName;
+  if (!window.confirm(`确定删除文件“${name}”吗？`)) return;
+  deleteFile.disabled = true;
+  const result = await API.request(`/api/materials/files/${deleteFile.dataset.deleteFile}`, {
+    method: "DELETE"
+  });
+  if (result.ok) {
+    API.toast(result.message);
+    loadMaterials();
+  } else {
+    deleteFile.disabled = false;
+    API.toast(result.message, "error");
+  }
+});
+
+loadMaterials();
+</script>
+{% endblock %}
