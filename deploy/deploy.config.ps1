@@ -1,23 +1,24 @@
-# Copy this file when you need to override automatic detection.
-# Keep Mode = "Auto" for normal packages.
+# Package-specific defaults for the Windows one-click deployer.
+# Change Mode only when deploying a different project type.
 
 @{
     AppName = "kechuang"
-    Mode = "Auto"                  # Auto, Docker, Python, Node, Static, Custom
+    Mode = "Python"
     InstallDependencies = $true
-    AutoInstallRuntimes = $true    # Uses winget when Python/Node.js is missing.
-    Offline = $false               # Set to $true when deploying without internet.
-    RunBuild = $true               # Runs "npm run build" when package.json has that script.
+    AutoInstallRuntimes = $true
+    Offline = $false
+    InstallOcrDependencies = $false
+    UseSqlite = $true
+    RunBuild = $true
     StartAfterDeploy = $true
 
-    # Optional overrides:
-    Url = ""
+    Url = "http://127.0.0.1:8000"
     HealthCheckUrl = ""
     Port = 8080
-    PythonCommand = ""             # Example: "runtime\python\python.exe"
-    NodeCommand = ""               # Example: "runtime\node\node.exe"
-    DockerComposeFile = ""         # Example: "docker-compose.yml"
-    StartExecutable = ""           # Example: "venv\Scripts\python.exe" or "npm.cmd"
-    StartArguments = @()           # Example: @("run", "start")
-    WorkingDirectory = ""          # Defaults to the package root.
+    PythonCommand = ""
+    NodeCommand = ""
+    DockerComposeFile = ""
+    StartExecutable = ".venv\Scripts\python.exe"
+    StartArguments = @("run_prod.py")
+    WorkingDirectory = ""
 }

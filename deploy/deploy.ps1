@@ -133,7 +133,7 @@ function Invoke-External {
     )
 
     Write-Info ("Run: {0} {1}" -f $FilePath, ($Arguments -join " "))
-    & $FilePath @Arguments
+    & $FilePath @Arguments | ForEach-Object { Write-Host "    $_" }
     $exitCode = $LASTEXITCODE
     if ($exitCode -ne 0 -and -not $AllowFailure) {
         Failure ("{0} (exit code: {1})" -f $ErrorMessage, $exitCode)
@@ -187,6 +187,7 @@ function Get-ProjectMode {
         }
     }
 
+    if ($null -ne (Get-ComposeFile)) { return "Docker" }
     if (Test-Path -LiteralPath (Join-Path $script:Root "package.json") -PathType Leaf) {
         return "Node"
     }
@@ -277,6 +278,28 @@ function Install-WingetPackage {
     Refresh-ProcessPath
 }
 
+function Resolve-PythonFromLauncher {
+    $launcher = Get-CommandPath "py.exe"
+    if ([string]::IsNullOrWhiteSpace($launcher)) {
+        return $null
+    }
+
+    foreach ($selector in @("-3.11", "-3.12", "-3")) {
+        try {
+            $candidate = & $launcher $selector -c "import sys; print(sys.executable)" 2>$null | Select-Object -First 1
+        }
+        catch {
+            continue
+        }
+
+        if ($LASTEXITCODE -eq 0 -and -not [string]::IsNullOrWhiteSpace($candidate) -and (Test-Path -LiteralPath $candidate -PathType Leaf)) {
+            return [string]$candidate
+        }
+    }
+
+    return $null
+}
+
 function Resolve-PythonCommand {
     $configured = [string](Get-ConfigValue -Name "PythonCommand" -Default "")
     if (-not [string]::IsNullOrWhiteSpace($configured)) {
@@ -293,6 +316,11 @@ function Resolve-PythonCommand {
     }
 
     $python = Get-CommandPath "python.exe"
+    if (-not [string]::IsNullOrWhiteSpace($python)) {
+        return $python
+    }
+
+    $python = Resolve-PythonFromLauncher
     if (-not [string]::IsNullOrWhiteSpace($python)) {
         return $python
     }
@@ -339,6 +367,100 @@ function Get-Wheelhouse {
     return $null
 }
 
+function New-RandomSecret {
+    $bytes = New-Object byte[] 48
+    $rng = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $rng.GetBytes($bytes)
+    }
+    finally {
+        $rng.Dispose()
+    }
+    return [Convert]::ToBase64String($bytes)
+}
+
+function Ensure-ProjectEnvironment {
+    $nl = [Environment]::NewLine
+    $envPath = Join-Path $script:Root ".env"
+    $examplePath = Join-Path $script:Root ".env.example"
+    $envExisted = Test-Path -LiteralPath $envPath -PathType Leaf
+
+    if (-not $envExisted) {
+        if (Test-Path -LiteralPath $examplePath -PathType Leaf) {
+            Copy-Item -LiteralPath $examplePath -Destination $envPath
+        }
+        else {
+            New-Item -ItemType File -Path $envPath -Force | Out-Null
+        }
+        Write-Ok "Created .env from the package defaults"
+    }
+
+    $content = Get-Content -LiteralPath $envPath -Raw
+    if ($null -eq $content) {
+        $content = ""
+    }
+
+    if (-not $envExisted) {
+        if ([bool](Get-ConfigValue -Name "UseSqlite" -Default $false)) {
+            if ($content -match "(?m)^DATABASE_URL=") {
+                $content = [regex]::Replace($content, "(?m)^DATABASE_URL=.*$", "DATABASE_URL=sqlite:///kechuang.db")
+            }
+            else {
+                $content = $content.TrimEnd() + $nl + "DATABASE_URL=sqlite:///kechuang.db" + $nl
+            }
+        }
+
+        if ($content -match "(?m)^SECRET_KEY=change-this-to-a-random-secret\s*$") {
+            $secret = New-RandomSecret
+            $content = [regex]::Replace($content, "(?m)^SECRET_KEY=change-this-to-a-random-secret\s*$", "SECRET_KEY=$secret")
+        }
+    }
+
+    $existingKeys = @{}
+    foreach ($line in ($content -split "\r?\n")) {
+        if ($line -match "^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=") {
+            $existingKeys[$matches[1]] = $true
+        }
+    }
+
+    $appendLines = @()
+    if (-not $existingKeys.ContainsKey("SECRET_KEY")) {
+        $appendLines += "SECRET_KEY=$(New-RandomSecret)"
+    }
+
+    if (-not $existingKeys.ContainsKey("DATABASE_URL")) {
+        if ([bool](Get-ConfigValue -Name "UseSqlite" -Default $false)) {
+            $appendLines += "DATABASE_URL=sqlite:///kechuang.db"
+        }
+    }
+
+    foreach ($entry in @(
+        "ADMIN_USERNAME=admin",
+        "ADMIN_PASSWORD=Admin123!",
+        "ADMIN_NAME=系统管理员",
+        "ADMIN_STUDENT_ID=admin",
+        "ADMIN_DEPARTMENT=大学生科创实践中心",
+        "AUTO_CREATE_DB=true",
+        "OCR_ENGINE=paddle",
+        "PADDLE_RUNTIME_HOME=instance/paddle_runtime",
+        "CSRF_ENABLED=true",
+        "SESSION_COOKIE_SECURE=false",
+        "TRUST_PROXY=false"
+    )) {
+        $key = ($entry -split "=", 2)[0]
+        if (-not $existingKeys.ContainsKey($key)) {
+            $appendLines += $entry
+        }
+    }
+
+    if ($appendLines.Count -gt 0) {
+        $content = $content.TrimEnd() + $nl + ($appendLines -join $nl) + $nl
+        Write-Ok "Filled missing local settings in .env"
+    }
+
+    [System.IO.File]::WriteAllText($envPath, $content, (New-Object System.Text.UTF8Encoding($false)))
+    return $envPath
+}
 function Install-PythonMode {
     $python = Resolve-PythonCommand
     Assert-PythonWorks -Python $python
@@ -347,11 +469,13 @@ function Install-PythonMode {
     $venvPython = Join-Path $venvDir "Scripts\python.exe"
     if (-not (Test-Path -LiteralPath $venvPython -PathType Leaf)) {
         Write-Info "Creating virtual environment at $venvDir"
-        Invoke-External -FilePath $python -Arguments @("-m", "venv", $venvDir) -ErrorMessage "Failed to create the virtual environment"
+        Invoke-External -FilePath $python -Arguments @("-m", "venv", $venvDir) -ErrorMessage "Failed to create the virtual environment" | Out-Null
     }
     else {
         Write-Ok "Reusing virtual environment"
     }
+
+    Ensure-ProjectEnvironment | Out-Null
 
     if (-not [bool](Get-ConfigValue -Name "InstallDependencies" -Default $true)) {
         Write-Warn "Dependency installation is disabled."
@@ -372,7 +496,7 @@ function Install-PythonMode {
 
     if (-not $offline) {
         $upgradeArgs = $pipBase + @("--upgrade", "pip", "setuptools", "wheel")
-        Invoke-External -FilePath $venvPython -Arguments $upgradeArgs -ErrorMessage "Failed to upgrade pip tooling"
+        Invoke-External -FilePath $venvPython -Arguments $upgradeArgs -ErrorMessage "Failed to upgrade pip tooling" | Out-Null
     }
 
     $requirements = $null
@@ -386,18 +510,36 @@ function Install-PythonMode {
 
     if ($null -ne $requirements) {
         $requirementsArgs = $pipBase + @("-r", $requirements)
-        Invoke-External -FilePath $venvPython -Arguments $requirementsArgs -ErrorMessage "Failed to install Python requirements"
+        Invoke-External -FilePath $venvPython -Arguments $requirementsArgs -ErrorMessage "Failed to install Python requirements" | Out-Null
     }
 
     $pyproject = Join-Path $script:Root "pyproject.toml"
     $setupPy = Join-Path $script:Root "setup.py"
     if (Test-Path -LiteralPath $pyproject -PathType Leaf) {
         $projectArgs = $pipBase + @("-e", $script:Root)
-        Invoke-External -FilePath $venvPython -Arguments $projectArgs -ErrorMessage "Failed to install the Python project"
+        Invoke-External -FilePath $venvPython -Arguments $projectArgs -ErrorMessage "Failed to install the Python project" | Out-Null
     }
     elseif (Test-Path -LiteralPath $setupPy -PathType Leaf) {
         $projectArgs = $pipBase + @("-e", $script:Root)
-        Invoke-External -FilePath $venvPython -Arguments $projectArgs -ErrorMessage "Failed to install the Python project"
+        Invoke-External -FilePath $venvPython -Arguments $projectArgs -ErrorMessage "Failed to install the Python project" | Out-Null
+    }
+
+    $windowsRequirements = Join-Path $PSScriptRoot "requirements-windows.txt"
+    if (Test-Path -LiteralPath $windowsRequirements -PathType Leaf) {
+        $windowsArgs = $pipBase + @("-r", $windowsRequirements)
+        Invoke-External -FilePath $venvPython -Arguments $windowsArgs -ErrorMessage "Failed to install Windows runtime requirements" | Out-Null
+    }
+
+    if ([bool](Get-ConfigValue -Name "InstallOcrDependencies" -Default $false)) {
+        $ocrRequirements = Join-Path $script:Root "requirements-ocr.txt"
+        if (Test-Path -LiteralPath $ocrRequirements -PathType Leaf) {
+            $ocrArgs = $pipBase + @("-r", $ocrRequirements)
+            Invoke-External -FilePath $venvPython -Arguments $ocrArgs -ErrorMessage "Failed to install PaddleOCR requirements" | Out-Null
+            Write-Ok "PaddleOCR dependencies are ready"
+        }
+        else {
+            Write-Warn "InstallOcrDependencies=true but requirements-ocr.txt was not found"
+        }
     }
 
     Write-Ok "Python dependencies are ready"
@@ -776,7 +918,7 @@ function ConvertTo-ArgumentString {
 function Test-ProcessMatchesState {
     param([hashtable]$State)
 
-    $pidValue = Get-StateValue -Name "ProcessId" -Default $null -ErrorAction SilentlyContinue
+    $pidValue = Get-StateValue -Name "ProcessId" -Default $null
     if ($null -eq $pidValue) {
         return $false
     }
@@ -786,15 +928,15 @@ function Test-ProcessMatchesState {
         return $false
     }
 
-    $storedStart = [string](Get-StateValue -Name "ProcessStartTime" -Default "")
-    if ([string]::IsNullOrWhiteSpace($storedStart)) {
+    $storedStart = Get-StateValue -Name "ProcessStartTime" -Default $null
+    if ($null -eq $storedStart -or $storedStart -is [datetime] -or $storedStart -is [string]) {
         return $true
     }
 
     try {
-        $expected = [DateTime]::Parse($storedStart).ToUniversalTime()
-        $actual = $process.StartTime.ToUniversalTime()
-        return [math]::Abs(($expected - $actual).TotalSeconds) -lt 5
+        $expected = [long]$storedStart
+        $actual = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
+        return $expected -eq $actual
     }
     catch {
         return $true
@@ -883,7 +1025,7 @@ function Start-App {
     }
 
     $script:State["ProcessId"] = $process.Id
-    $script:State["ProcessStartTime"] = $process.StartTime.ToUniversalTime().ToString("o")
+    $script:State["ProcessStartTime"] = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
     Save-State -State $script:State
 
     Write-Ok "Application started (PID $($process.Id))"
@@ -1075,7 +1217,7 @@ function Invoke-Main {
         New-Item -ItemType Directory -Path $script:DeployDir -Force | Out-Null
         $transcript = Join-Path $script:DeployDir "deploy.log"
         try {
-            Start-Transcript -LiteralPath $transcript -Append | Out-Null
+            Start-Transcript -Path $transcript -Append | Out-Null
             $script:TranscriptStarted = $true
         }
         catch {
@@ -1096,7 +1238,8 @@ function Invoke-Main {
                 Show-Status
             }
             "Doctor" {
-                $detectedMode = try { Get-ProjectMode } catch { "Unknown" }
+                $detectedMode = "Unknown"
+                try { $detectedMode = Get-ProjectMode } catch { }
                 Show-Doctor -DetectedMode $detectedMode
             }
         }
@@ -1112,8 +1255,15 @@ $configPath = Join-Path $PSScriptRoot "deploy.config.ps1"
 if (Test-Path -LiteralPath $configPath -PathType Leaf) {
     $loadedConfig = & $configPath
     if ($null -ne $loadedConfig) {
-        foreach ($property in $loadedConfig.PSObject.Properties) {
-            $script:Config[$property.Name] = $property.Value
+        if ($loadedConfig -is [System.Collections.IDictionary]) {
+            foreach ($key in $loadedConfig.Keys) {
+                $script:Config[[string]$key] = $loadedConfig[$key]
+            }
+        }
+        else {
+            foreach ($property in $loadedConfig.PSObject.Properties) {
+                $script:Config[$property.Name] = $property.Value
+            }
         }
     }
 }
