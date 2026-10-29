@@ -58,7 +58,10 @@
 <section class="tool-panel hidden" data-batch-results>
   <div class="form-heading">
     <h2>识别结果</h2>
-    <span class="muted" data-batch-result-summary></span>
+    <div class="batch-result-actions">
+      <span class="muted" data-batch-result-summary></span>
+      <button class="button primary" type="button" data-batch-save-all disabled>一键全部保存</button>
+    </div>
   </div>
   <div class="batch-result-list" data-batch-result-list></div>
 </section>
@@ -71,12 +74,14 @@ const batchBody = document.querySelector("[data-batch-body]");
 const batchError = document.querySelector("[data-batch-error]");
 const batchSubmit = document.querySelector("[data-batch-submit]");
 const batchClear = document.querySelector("[data-batch-clear]");
+const batchSaveAll = document.querySelector("[data-batch-save-all]");
 const autoOwnerToggle = document.querySelector("[data-auto-owner]");
 const autoDepartmentInput = document.querySelector("[data-auto-department]");
-const BATCH_STORAGE_KEY = "kechuang.batch-upload.state.v1";
+const BATCH_STORAGE_KEY = "kechuang.batch-upload.state.v2";
 let members = [];
 let batchItems = [];
 let isUploading = false;
+let isSavingAll = false;
 
 function normalizeMatchValue(value) {
   return String(value || "").normalize("NFKC").toLowerCase().replace(/\s+/g, "");
@@ -98,6 +103,9 @@ function persistBatchState() {
       lastModified: item.file?.lastModified || item.lastModified || 0,
       memberId: item.memberId || "",
       status: item.status,
+      uploadId: item.uploadId || null,
+      saved: Boolean(item.saved),
+      saveError: item.saveError || "",
       message: item.message || "",
       reviewUrl: item.reviewUrl || "",
       resolvedMember: item.resolvedMember || null
@@ -121,6 +129,9 @@ function restoreBatchState() {
       lastModified: item.lastModified,
       memberId: item.memberId || "",
       status: item.status === "done" ? "done" : "error",
+      uploadId: item.uploadId || null,
+      saved: Boolean(item.saved),
+      saveError: item.saveError || "",
       message: item.status === "done"
         ? item.message || ""
         : "页面刷新后本地文件已释放，请重新选择此图片",
@@ -169,15 +180,18 @@ function memberOptions(selectedId) {
 
 function statusLabel(item) {
   if (item.status === "uploading") return "识别中...";
+  if (item.saving) return "保存中...";
+  if (item.saved) return "已保存";
   if (item.status === "done") return "识别完成";
   if (item.status === "error") return "识别失败";
   return "等待上传";
 }
 
 function statusClass(item) {
-  if (item.status === "done") return "success";
+  if (item.saved) return "success";
   if (item.status === "error") return "error";
-  if (item.status === "uploading") return "working";
+  if (item.status === "uploading" || item.saving) return "working";
+  if (item.status === "done") return "pending";
   return "pending";
 }
 
@@ -192,12 +206,14 @@ function renderBatch() {
   batchBody.innerHTML = batchItems.map((item, index) => {
     const member = item.resolvedMember ||
       members.find((candidate) => String(candidate.id) === String(item.memberId));
-    const locked = item.status === "done" || item.status === "uploading";
+    const locked = item.status === "done" ||
+      item.status === "uploading" ||
+      item.saving;
     let actionHtml = "";
-    if (item.reviewUrl && !isUploading) {
-      actionHtml = `<a class="text-button" href="${item.reviewUrl}">核对并保存</a>`;
+    if (item.reviewUrl && !isUploading && !isSavingAll && !item.saving) {
+      actionHtml = `<a class="text-button" href="${item.reviewUrl}">${item.saved ? "查看核对" : "核对并保存"}</a>`;
     } else if (item.reviewUrl) {
-      actionHtml = '<span class="muted">识别完成后可核对</span>';
+      actionHtml = '<span class="muted">处理中，稍后可核对</span>';
     } else {
       actionHtml = `<button class="text-button danger" type="button" data-batch-remove="${index}" ${locked ? "disabled" : ""}>移除</button>`;
     }
@@ -215,6 +231,7 @@ function renderBatch() {
         <td>
           <span class="batch-status ${statusClass(item)}">${statusLabel(item)}</span>
           ${item.message ? `<small class="batch-message">${API.escapeHtml(item.message)}</small>` : ""}
+          ${item.saveError ? `<small class="batch-message form-error">${API.escapeHtml(item.saveError)}</small>` : ""}
         </td>
         <td>
           ${actionHtml}
@@ -223,10 +240,14 @@ function renderBatch() {
     `;
   }).join("") || '<tr><td colspan="4" class="empty-cell">请选择要上传的课表图片</td></tr>';
 
-  batchSubmit.disabled = isUploading || !batchItems.length ||
+  batchSubmit.disabled = isUploading || isSavingAll || !batchItems.length ||
     batchItems.every((item) => item.status === "done");
-  batchClear.disabled = isUploading || !batchItems.length;
-  batchInput.disabled = isUploading;
+  batchClear.disabled = isUploading || isSavingAll || !batchItems.length;
+  batchInput.disabled = isUploading || isSavingAll;
+  batchSaveAll.disabled = isUploading || isSavingAll ||
+    !batchItems.some((item) =>
+      item.status === "done" && item.reviewUrl && !item.saved
+    );
   persistBatchState();
 }
 
@@ -264,6 +285,9 @@ function addFiles(fileList) {
       lastModified: file.lastModified,
       memberId: matched ? matched.id : "",
       status: "pending",
+      uploadId: null,
+      saved: false,
+      saveError: "",
       message: "",
       reviewUrl: ""
     });
@@ -290,6 +314,7 @@ async function loadMembers() {
 }
 
 async function submitBatch() {
+  if (isSavingAll) return;
   batchError.textContent = "";
   const missingMember = autoOwnerToggle.checked
     ? null
@@ -326,6 +351,9 @@ async function submitBatch() {
     });
     if (result.ok) {
       item.status = "done";
+      item.uploadId = result.upload?.id || null;
+      item.saved = false;
+      item.saveError = "";
       item.reviewUrl = `${result.review_url}?next=/batch-upload`;
       item.resolvedMember = result.user;
       const ownerText = result.owner_detection?.name
@@ -345,15 +373,93 @@ async function submitBatch() {
   renderResults();
 }
 
+async function saveDraft(item) {
+  item.saving = true;
+  item.saveError = "";
+  renderBatch();
+  renderResults();
+  try {
+    if (!item.uploadId) {
+      throw new Error("缺少上传记录，请重新识别");
+    }
+    const draft = await API.request(`/api/schedules/uploads/${item.uploadId}`);
+    if (!draft.ok) {
+      throw new Error(draft.message || "读取识别结果失败");
+    }
+    if (draft.upload?.status !== "confirmed") {
+      const courses = draft.draft_courses || [];
+      if (!courses.length) {
+        throw new Error("没有有效识别结果");
+      }
+      const result = await API.request("/api/schedules/save", {
+        method: "POST",
+        body: JSON.stringify({
+          upload_id: item.uploadId,
+          courses,
+          replace_existing: true
+        })
+      });
+      if (!result.ok) {
+        throw new Error(result.message || "保存失败");
+      }
+    }
+    item.saved = true;
+    item.message =
+      `已保存 ${draft.free_period_schedule?.total_free_slots || 0} 个无课时段`;
+    return true;
+  } catch (error) {
+    item.saveError = error.message || "保存失败";
+    return false;
+  } finally {
+    item.saving = false;
+    renderBatch();
+    renderResults();
+  }
+}
+
+async function saveAllDrafts() {
+  if (isSavingAll || isUploading) return;
+  const pendingItems = batchItems.filter((item) =>
+    item.status === "done" && item.reviewUrl && !item.saved
+  );
+  if (!pendingItems.length) {
+    API.toast("没有待保存的识别结果");
+    return;
+  }
+
+  isSavingAll = true;
+  batchError.textContent = "";
+  renderBatch();
+  renderResults();
+  let successCount = 0;
+  let failedCount = 0;
+  for (const item of pendingItems) {
+    if (await saveDraft(item)) {
+      successCount += 1;
+    } else {
+      failedCount += 1;
+    }
+  }
+  isSavingAll = false;
+  renderBatch();
+  renderResults();
+  if (failedCount) {
+    API.toast(`已保存 ${successCount} 人，${failedCount} 人保存失败，可再次重试`, "error");
+  } else {
+    API.toast(`已全部保存，共 ${successCount} 人`);
+  }
+}
+
 function renderResults() {
   const panel = document.querySelector("[data-batch-results]");
   const list = document.querySelector("[data-batch-result-list]");
   const successCount = batchItems.filter((item) => item.status === "done").length;
   const errorCount = batchItems.filter((item) => item.status === "error").length;
+  const savedCount = batchItems.filter((item) => item.saved).length;
   if (!successCount && !errorCount) return;
   panel.classList.remove("hidden");
   document.querySelector("[data-batch-result-summary]").textContent =
-    `成功 ${successCount} 张，失败 ${errorCount} 张`;
+    `识别成功 ${successCount} 张，已保存 ${savedCount} 张，失败 ${errorCount} 张`;
   list.innerHTML = batchItems.map((item) => {
     const member = item.resolvedMember ||
       members.find((candidate) => String(candidate.id) === String(item.memberId));
@@ -362,9 +468,10 @@ function renderResults() {
         <span>
           <strong>${API.escapeHtml(itemFilename(item))}</strong>
           <small>${API.escapeHtml(memberLabel(member))}</small>
+          ${item.saveError ? `<small class="form-error">${API.escapeHtml(item.saveError)}</small>` : ""}
         </span>
         ${item.reviewUrl
-          ? `<a class="button secondary" href="${item.reviewUrl}">核对并保存</a>`
+          ? `<a class="button secondary" href="${item.reviewUrl}">${item.saved ? "查看核对" : "核对并保存"}</a>`
           : `<span class="form-error">${API.escapeHtml(item.message || "识别失败")}</span>`}
       </div>
     `;
@@ -401,8 +508,9 @@ batchBody.addEventListener("click", (event) => {
 });
 
 batchSubmit.addEventListener("click", submitBatch);
+batchSaveAll.addEventListener("click", saveAllDrafts);
 batchClear.addEventListener("click", () => {
-  if (isUploading || !batchItems.length) return;
+  if (isUploading || isSavingAll || !batchItems.length) return;
   batchItems = [];
   sessionStorage.removeItem(BATCH_STORAGE_KEY);
   renderBatch();

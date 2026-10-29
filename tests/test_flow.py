@@ -469,7 +469,12 @@ def test_admin_can_render_management_pages(app, client):
     assert "批量识别无课" in dashboard_html
     assert client.get("/users").status_code == 200
     assert client.get("/upload").status_code == 200
-    assert client.get("/batch-upload").status_code == 200
+    batch_page = client.get("/batch-upload")
+    assert batch_page.status_code == 200
+    batch_html = batch_page.get_data(as_text=True)
+    assert "data-batch-save-all" in batch_html
+    assert "一键全部保存" in batch_html
+    assert "核对并保存" in batch_html
     assert client.get(f"/upload?user_id={member['id']}").status_code == 200
     assert client.get("/query").status_code == 200
     assert client.get("/summary").status_code == 200

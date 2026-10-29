@@ -618,6 +618,15 @@ textarea:focus {
   gap: 10px;
 }
 
+.batch-result-actions {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+}
+
 .batch-result-item {
   display: flex;
   align-items: center;
@@ -1995,6 +2004,22 @@ textarea:focus {
   .batch-result-item {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .batch-result-actions {
+    width: 100%;
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  [data-batch-results] .form-heading {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .batch-result-actions .button {
+    width: 100%;
   }
 
   .batch-result-item .button {
