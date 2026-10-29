@@ -455,6 +455,17 @@ def test_summary_preview_and_xlsx_export(app, client):
         assert 'xml:space="preserve"' in sheet_xml
         assert "刘同学\n陈同学" in sheet_xml
 
+    export_week_two = client.get(
+        "/api/availability-summary/export",
+        query_string={"department": "", "week_number": "2"},
+    )
+    assert export_week_two.status_code == 200
+    with ZipFile(BytesIO(export_week_two.data)) as archive:
+        week_two_sheet = archive.read(
+            "xl/worksheets/sheet1.xml"
+        ).decode("utf-8")
+        assert "第 2 周" in week_two_sheet
+
 
 def test_admin_can_render_management_pages(app, client):
     member = create_user(app, "member30", "周同学", "20260300")
@@ -477,7 +488,11 @@ def test_admin_can_render_management_pages(app, client):
     assert "核对并保存" in batch_html
     assert client.get(f"/upload?user_id={member['id']}").status_code == 200
     assert client.get("/query").status_code == 200
-    assert client.get("/summary").status_code == 200
+    summary_page = client.get("/summary")
+    assert summary_page.status_code == 200
+    summary_html = summary_page.get_data(as_text=True)
+    assert "data-export-week" in summary_html
+    assert "导出周次" in summary_html
     assert client.get(f"/admin/users/{member['id']}/schedule").status_code == 200
 
 

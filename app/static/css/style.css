@@ -392,6 +392,23 @@ button {
   flex-wrap: wrap;
 }
 
+.summary-export-controls {
+  display: flex;
+  align-items: flex-end;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.summary-export-controls label {
+  min-width: 130px;
+  gap: 4px;
+}
+
+.summary-export-controls select {
+  min-height: 40px;
+}
+
 label {
   display: grid;
   gap: 7px;
@@ -1953,6 +1970,15 @@ textarea:focus {
 
   .page-heading h1 {
     font-size: 28px;
+  }
+
+  .summary-export-controls {
+    width: 100%;
+    align-items: stretch;
+  }
+
+  .summary-export-controls label {
+    flex: 1 1 150px;
   }
 
   .metric-strip {

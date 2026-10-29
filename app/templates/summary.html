@@ -7,7 +7,13 @@
     <h1>部门成员无课汇总</h1>
     <p class="muted" data-summary-status>正在加载部门...</p>
   </div>
-  <button class="button primary" type="button" data-export disabled>导出 Excel</button>
+  <div class="summary-export-controls">
+    <label>
+      导出周次
+      <select data-export-week aria-label="导出周次"></select>
+    </label>
+    <button class="button primary" type="button" data-export disabled>导出 Excel</button>
+  </div>
 </section>
 
 <form class="tool-panel summary-form" data-summary-form>
@@ -94,6 +100,7 @@ const departmentSelect = document.querySelector("[data-summary-department]");
 const weekInput = document.querySelector("[data-summary-week]");
 const errorBox = document.querySelector("[data-summary-error]");
 const exportButton = document.querySelector("[data-export]");
+const exportWeekSelect = document.querySelector("[data-export-week]");
 const memberEditorSelect = document.querySelector("[data-summary-member-select]");
 const resetOverridesButton = document.querySelector("[data-summary-reset-overrides]");
 const toggleAddMemberButton = document.querySelector("[data-toggle-add-member]");
@@ -102,6 +109,15 @@ const addMemberForm = document.querySelector("[data-add-member-form]");
 let currentSummary = null;
 let generateTimer = null;
 let selectedMemberId = "";
+let exportWeekManuallySelected = false;
+
+for (let week = 1; week <= 30; week += 1) {
+  const option = document.createElement("option");
+  option.value = String(week);
+  option.textContent = `第 ${week} 周`;
+  exportWeekSelect.append(option);
+}
+exportWeekSelect.value = weekInput.value;
 
 function summaryParams() {
   return new URLSearchParams({
@@ -112,6 +128,9 @@ function summaryParams() {
 
 function renderSummary(summary) {
   currentSummary = summary;
+  if (!exportWeekManuallySelected) {
+    exportWeekSelect.value = String(summary.week_number);
+  }
   document.querySelector("[data-summary-status]").textContent =
     `${summary.department_label} · 第 ${summary.week_number} 周`;
   document.querySelector("[data-summary-member-count]").textContent = summary.member_count;
@@ -266,6 +285,7 @@ function renderMemberEditor(summary) {
 
 async function generateSummary() {
   errorBox.textContent = "";
+  exportButton.disabled = true;
   document.querySelector("[data-summary-status]").textContent = "正在生成...";
   const result = await API.request(`/api/availability-summary?${summaryParams().toString()}`);
   if (!result.ok) {
@@ -415,9 +435,22 @@ resetOverridesButton.addEventListener("click", async () => {
   });
 });
 
+exportWeekSelect.addEventListener("change", () => {
+  exportWeekManuallySelected = true;
+});
+
 exportButton.addEventListener("click", () => {
   if (!currentSummary) return;
-  window.location.href = `/api/availability-summary/export?${summaryParams().toString()}`;
+  const exportWeek = Number(exportWeekSelect.value);
+  if (!Number.isInteger(exportWeek) || exportWeek < 1 || exportWeek > 30) {
+    errorBox.textContent = "请选择要导出的教学周";
+    return;
+  }
+  const params = new URLSearchParams({
+    department: currentSummary.department,
+    week_number: String(exportWeek)
+  });
+  window.location.href = `/api/availability-summary/export?${params.toString()}`;
 });
 
 loadDepartments();
