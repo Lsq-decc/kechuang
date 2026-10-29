@@ -59,7 +59,7 @@ class Config:
         "VISION_BASE_URL",
         "https://dashscope.aliyuncs.com/compatible-mode/v1",
     ).rstrip("/")
-    VISION_MODEL = os.getenv("VISION_MODEL", "qwen-vl-max").strip()
+    VISION_MODEL = os.getenv("VISION_MODEL", "qwen3-vl-plus").strip()
     VISION_TIMEOUT = int(os.getenv("VISION_TIMEOUT", "120"))
     VISION_MAX_TOKENS = int(os.getenv("VISION_MAX_TOKENS", "4096"))
     VISION_MAX_IMAGE_WIDTH = int(os.getenv("VISION_MAX_IMAGE_WIDTH", "2000"))

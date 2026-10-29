@@ -309,7 +309,7 @@ AI_PARSER_MAX_ITEMS=400
 VISION_PARSER_ENABLED=false
 VISION_API_KEY=
 VISION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-VISION_MODEL=qwen-vl-max
+VISION_MODEL=qwen3-vl-plus
 VISION_TIMEOUT=120
 VISION_MAX_TOKENS=4096
 VISION_MAX_IMAGE_WIDTH=2000
@@ -342,7 +342,7 @@ DEEPSEEK_MODEL=deepseek-chat
 VISION_PARSER_ENABLED=true
 VISION_API_KEY=你的视觉模型密钥
 VISION_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-VISION_MODEL=qwen-vl-max
+VISION_MODEL=qwen3-vl-plus
 ```
 
 该模式不依赖 PaddleOCR，上传后的流程是：

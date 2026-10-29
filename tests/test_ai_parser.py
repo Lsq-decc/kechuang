@@ -205,7 +205,7 @@ def test_vision_parser_sends_image_and_requires_weeks(app, monkeypatch, tmp_path
             "VISION_PARSER_ENABLED": True,
             "VISION_API_KEY": "vision-test-key",
             "VISION_BASE_URL": "https://vision.example.com/v1",
-            "VISION_MODEL": "qwen-vl-max",
+            "VISION_MODEL": "qwen3-vl-plus",
             "VISION_TIMEOUT": 30,
             "VISION_MAX_TOKENS": 2048,
             "VISION_MAX_IMAGE_WIDTH": 1200,
@@ -353,7 +353,7 @@ def test_upload_prefers_vision_parser(app, client, monkeypatch):
         {
             "VISION_PARSER_ENABLED": True,
             "VISION_API_KEY": "vision-test-key",
-            "VISION_MODEL": "qwen-vl-max",
+            "VISION_MODEL": "qwen3-vl-plus",
         }
     )
     create_admin(app, username="vision_admin", student_id="vision_admin")
@@ -391,7 +391,7 @@ def test_upload_prefers_vision_parser(app, client, monkeypatch):
             ],
             {
                 "provider": "vision",
-                "model": "qwen-vl-max",
+                "model": "qwen3-vl-plus",
                 "usage": {},
                 "owner_name": "视觉测试成员",
                 "raw_content": '{"courses":[]}',
