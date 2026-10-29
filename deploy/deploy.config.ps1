@@ -1,4 +1,4 @@
-# Package-specific defaults for the Windows one-click deployer.
+﻿# Package-specific defaults for the Windows one-click deployer.
 # Change Mode only when deploying a different project type.
 
 @{
@@ -15,6 +15,8 @@
     Url = "http://127.0.0.1:8000"
     HealthCheckUrl = ""
     Port = 8080
+    UpgradePipTools = $false
+    PipIndexUrl = ""
     PythonCommand = ""
     NodeCommand = ""
     DockerComposeFile = ""

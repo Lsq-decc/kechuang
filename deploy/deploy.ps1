@@ -1,4 +1,4 @@
-param(
+﻿param(
     [ValidateSet("Deploy", "Start", "Stop", "Status", "Doctor")]
     [string]$Action = "Deploy",
     [switch]$NoStart
@@ -461,6 +461,31 @@ function Ensure-ProjectEnvironment {
     [System.IO.File]::WriteAllText($envPath, $content, (New-Object System.Text.UTF8Encoding($false)))
     return $envPath
 }
+function Invoke-PipInstall {
+    param(
+        [string]$Python,
+        [string[]]$Arguments,
+        [string]$ErrorMessage,
+        [switch]$Required
+    )
+
+    for ($attempt = 1; $attempt -le 2; $attempt++) {
+        $exitCode = Invoke-External -FilePath $Python -Arguments $Arguments -ErrorMessage $ErrorMessage -AllowFailure
+        if ($exitCode -eq 0) {
+            return
+        }
+
+        if ($attempt -lt 2) {
+            Write-Warn "Installation attempt $attempt failed; retrying in 3 seconds..."
+            Start-Sleep -Seconds 3
+        }
+    }
+
+    if ($Required) {
+        Failure $ErrorMessage
+    }
+}
+
 function Install-PythonMode {
     $python = Resolve-PythonCommand
     Assert-PythonWorks -Python $python
@@ -482,9 +507,15 @@ function Install-PythonMode {
         return $venvPython
     }
 
-    $pipBase = @("-m", "pip", "install", "--disable-pip-version-check")
+    $pipBase = @("-m", "pip", "install", "--disable-pip-version-check", "--timeout", "120", "--retries", "8", "--prefer-binary")
     $wheelhouse = Get-Wheelhouse
     $offline = [bool](Get-ConfigValue -Name "Offline" -Default $false)
+
+    $pipIndexUrl = [string](Get-ConfigValue -Name "PipIndexUrl" -Default "")
+    if (-not $offline -and -not [string]::IsNullOrWhiteSpace($pipIndexUrl)) {
+        $pipBase += @("--index-url", $pipIndexUrl)
+        Write-Info "Using Python package index: $pipIndexUrl"
+    }
 
     if ($null -ne $wheelhouse) {
         $pipBase += @("--no-index", "--find-links", $wheelhouse)
@@ -494,9 +525,19 @@ function Install-PythonMode {
         Failure "Offline=true but no wheelhouse/wheels folder was found."
     }
 
-    if (-not $offline) {
+    if (-not $offline -and [bool](Get-ConfigValue -Name "UpgradePipTools" -Default $false)) {
         $upgradeArgs = $pipBase + @("--upgrade", "pip", "setuptools", "wheel")
-        Invoke-External -FilePath $venvPython -Arguments $upgradeArgs -ErrorMessage "Failed to upgrade pip tooling" | Out-Null
+        $beforeUpgrade = $ErrorActionPreference
+        $ErrorActionPreference = "Continue"
+        try {
+            Invoke-PipInstall -Python $venvPython -Arguments $upgradeArgs -ErrorMessage "Pip tooling upgrade did not complete" | Out-Null
+        }
+        catch {
+            Write-Warn "Pip tooling upgrade failed; continuing with the bundled pip."
+        }
+        finally {
+            $ErrorActionPreference = $beforeUpgrade
+        }
     }
 
     $requirements = $null
@@ -510,7 +551,7 @@ function Install-PythonMode {
 
     if ($null -ne $requirements) {
         $requirementsArgs = $pipBase + @("-r", $requirements)
-        Invoke-External -FilePath $venvPython -Arguments $requirementsArgs -ErrorMessage "Failed to install Python requirements" | Out-Null
+        Invoke-PipInstall -Python $venvPython -Arguments $requirementsArgs -ErrorMessage "Failed to install Python requirements" -Required | Out-Null
     }
 
     $pyproject = Join-Path $script:Root "pyproject.toml"
@@ -527,14 +568,14 @@ function Install-PythonMode {
     $windowsRequirements = Join-Path $PSScriptRoot "requirements-windows.txt"
     if (Test-Path -LiteralPath $windowsRequirements -PathType Leaf) {
         $windowsArgs = $pipBase + @("-r", $windowsRequirements)
-        Invoke-External -FilePath $venvPython -Arguments $windowsArgs -ErrorMessage "Failed to install Windows runtime requirements" | Out-Null
+        Invoke-PipInstall -Python $venvPython -Arguments $windowsArgs -ErrorMessage "Failed to install Windows runtime requirements" -Required | Out-Null
     }
 
     if ([bool](Get-ConfigValue -Name "InstallOcrDependencies" -Default $false)) {
         $ocrRequirements = Join-Path $script:Root "requirements-ocr.txt"
         if (Test-Path -LiteralPath $ocrRequirements -PathType Leaf) {
             $ocrArgs = $pipBase + @("-r", $ocrRequirements)
-            Invoke-External -FilePath $venvPython -Arguments $ocrArgs -ErrorMessage "Failed to install PaddleOCR requirements" | Out-Null
+            Invoke-PipInstall -Python $venvPython -Arguments $ocrArgs -ErrorMessage "Failed to install PaddleOCR requirements" -Required | Out-Null
             Write-Ok "PaddleOCR dependencies are ready"
         }
         else {
@@ -1016,6 +1057,7 @@ function Start-App {
         -PassThru
 
     Start-Sleep -Seconds 2
+    $process.Refresh()
     if ($process.HasExited) {
         $details = ""
         if (Test-Path -LiteralPath $script:ErrLog) {
@@ -1028,7 +1070,37 @@ function Start-App {
     $script:State["ProcessStartTime"] = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
     Save-State -State $script:State
 
-    Write-Ok "Application started (PID $($process.Id))"
+    $ready = [string]::IsNullOrWhiteSpace($url)
+    if (-not $ready) {
+        Write-Info "Waiting for the application to become ready..."
+        for ($attempt = 0; $attempt -lt 30; $attempt++) {
+            $process.Refresh()
+            if ($process.HasExited) {
+                break
+            }
+            if (Test-Health -Url $url) {
+                $ready = $true
+                break
+            }
+            Start-Sleep -Seconds 1
+        }
+    }
+
+    $process.Refresh()
+    if ($process.HasExited) {
+        $details = ""
+        if (Test-Path -LiteralPath $script:ErrLog) {
+            $details = (Get-Content -LiteralPath $script:ErrLog -Tail 30 -ErrorAction SilentlyContinue) -join [Environment]::NewLine
+        }
+        Failure "The application exited during startup.`n$details"
+    }
+
+    if ($ready) {
+        Write-Ok "Application started (PID $($process.Id))"
+    }
+    else {
+        Write-Warn "Application process is running, but the health check timed out."
+    }
     if (-not [string]::IsNullOrWhiteSpace($url)) {
         Write-Info "URL: $url"
     }
