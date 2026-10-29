@@ -141,6 +141,14 @@ def test_admin_upload_fix_save_query_and_delete_file(monkeypatch, app, client):
     assert upload_response.status_code == 201
     upload_data = upload_response.get_json()
     assert upload_data["draft_courses"][0]["course_name"] == "高等数学"
+    assert upload_data["free_period_schedule"]["total_free_slots"] == 24
+
+    review_response = client.get(
+        f"/review/{upload_data['upload']['id']}"
+    )
+    assert review_response.status_code == 200
+    assert b"data-free-period-board" in review_response.data
+    assert b"data-course-body" not in review_response.data
 
     save_response = client.post(
         "/api/schedules/save",
@@ -457,8 +465,8 @@ def test_admin_can_render_management_pages(app, client):
     assert dashboard.status_code == 200
     dashboard_html = dashboard.get_data(as_text=True)
     assert "data-nav-group" in dashboard_html
-    assert "课表管理" in dashboard_html
-    assert "批量上传" in dashboard_html
+    assert "无课管理" in dashboard_html
+    assert "批量识别无课" in dashboard_html
     assert client.get("/users").status_code == 200
     assert client.get("/upload").status_code == 200
     assert client.get("/batch-upload").status_code == 200

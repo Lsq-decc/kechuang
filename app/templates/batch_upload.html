@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}批量上传课表 | 科创实践中心管理系统{% endblock %}
+{% block title %}批量识别无课时间 | 科创实践中心管理系统{% endblock %}
 {% block content %}
 <section class="page-heading compact">
   <div>
-    <p class="eyebrow">批量录入</p>
-    <h1>批量上传课表</h1>
+    <p class="eyebrow">批量识别</p>
+    <h1>批量识别无课时间</h1>
     <p class="muted" data-batch-summary>正在加载成员...</p>
   </div>
 </section>
@@ -52,7 +52,7 @@
 
 <div class="form-actions batch-actions">
   <button class="button secondary" type="button" data-batch-clear>清空列表</button>
-  <button class="button primary" type="button" data-batch-submit disabled>开始批量识别</button>
+  <button class="button primary" type="button" data-batch-submit disabled>开始批量识别无课时间</button>
 </div>
 
 <section class="tool-panel hidden" data-batch-results>
@@ -332,7 +332,7 @@ async function submitBatch() {
         ? `课表主人：${result.owner_detection.name}；`
         : "";
       item.message =
-        `${ownerText}提取 ${result.draft_courses?.length || 0} 条课程`;
+        `${ownerText}识别 ${result.free_period_schedule?.total_free_slots || 0} 个无课时段`;
     } else {
       item.status = "error";
       item.message = result.message;

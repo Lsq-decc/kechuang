@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}上传成员课表 | 科创实践中心管理系统{% endblock %}
+{% block title %}识别成员无课时间 | 科创实践中心管理系统{% endblock %}
 {% block content %}
 <section class="page-heading compact">
   <div>
-    <p class="eyebrow">课表录入</p>
-    <h1>上传成员课表</h1>
+    <p class="eyebrow">无课识别</p>
+    <h1>上传课表识别无课时间</h1>
   </div>
 </section>
 
@@ -39,7 +39,7 @@
   </div>
   <p class="form-error" data-form-error></p>
   <div class="form-actions">
-    <button class="button primary" type="submit" data-submit>上传并识别</button>
+    <button class="button primary" type="submit" data-submit>上传并识别无课时间</button>
   </div>
 </form>
 {% endblock %}
@@ -114,7 +114,7 @@ form.addEventListener("submit", async (event) => {
   const submitButton = form.querySelector("[data-submit]");
   errorBox.textContent = "";
   submitButton.disabled = true;
-  submitButton.textContent = "正在识别...";
+  submitButton.textContent = "正在识别无课时间...";
   const body = new FormData(form);
   const selectedMember = body.get("target_user_id");
   body.delete("target_user_id");
@@ -126,7 +126,7 @@ form.addEventListener("submit", async (event) => {
   }
   const result = await API.request("/api/schedules/upload", { method: "POST", body });
   submitButton.disabled = false;
-  submitButton.textContent = "上传并识别";
+  submitButton.textContent = "上传并识别无课时间";
   if (result.ok) {
     API.toast(result.message);
     window.location.href = result.review_url;

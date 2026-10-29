@@ -841,6 +841,59 @@ textarea:focus {
   text-align: center;
 }
 
+.free-period-board {
+  display: grid;
+  gap: 12px;
+  padding: 18px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.free-day {
+  min-width: 0;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.free-day h3 {
+  margin: 0 0 10px;
+  font-size: 15px;
+}
+
+.free-slot-list {
+  display: grid;
+  gap: 7px;
+}
+
+.free-slot-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid #b7d8c2;
+  border-radius: 6px;
+  color: #205c35;
+  background: #eff9f2;
+  font-size: 12px;
+}
+
+.free-slot-item strong,
+.free-slot-item span {
+  white-space: nowrap;
+}
+
+.free-slot-item strong {
+  font-size: 13px;
+}
+
+.free-slot-item span {
+  text-align: right;
+}
+
 .save-bar {
   display: grid;
   align-items: end;
@@ -848,6 +901,10 @@ textarea:focus {
   padding: 18px;
   border-top: 1px solid var(--line);
   grid-template-columns: 210px minmax(160px, 1fr) auto;
+}
+
+.review-save-bar {
+  grid-template-columns: minmax(160px, 1fr) auto;
 }
 
 .inline-field select {

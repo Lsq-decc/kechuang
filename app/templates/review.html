@@ -1,10 +1,10 @@
 {% extends "base.html" %}
-{% block title %}修正课表 | 科创实践中心管理系统{% endblock %}
+{% block title %}核对无课时间 | 科创实践中心管理系统{% endblock %}
 {% block content %}
 <section class="page-heading compact">
   <div>
-    <p class="eyebrow">识别结果</p>
-    <h1>{{ target_user.name ~ '的课表' if target_user.id != current_user.id else '核对并修正课程' }}</h1>
+    <p class="eyebrow">无课识别</p>
+    <h1>{{ target_user.name ~ '的无课时间' if target_user.id != current_user.id else '核对无课时间' }}</h1>
     {% if target_user.id != current_user.id %}
     <p class="muted">{{ target_user.department }} · {{ target_user.username }}</p>
     {% endif %}
@@ -28,43 +28,19 @@
       <span data-owner-name></span>
     </div>
     <div class="notice hidden" data-warning-box>
-      <strong>请重点核对</strong>
+      <strong>识别提示</strong>
       <ul data-warnings></ul>
     </div>
     <div class="table-toolbar">
-      <span><strong data-course-count>0</strong> 条课程</span>
-      <button class="button secondary" type="button" data-add-course>新增课程</button>
+      <span>共 <strong data-free-count>0</strong> 个无课时段</span>
     </div>
-    <div class="table-wrap">
-      <table class="data-table editable-table">
-        <thead>
-          <tr>
-            <th class="col-weekday">星期</th>
-            <th class="col-period">开始节</th>
-            <th class="col-period">结束节</th>
-            <th class="col-name">课程名称</th>
-            <th class="col-weeks">周数</th>
-            <th class="col-place">地点</th>
-            <th class="col-note">备注</th>
-            <th class="col-action">操作</th>
-          </tr>
-        </thead>
-        <tbody data-course-body></tbody>
-      </table>
-    </div>
-    <div class="empty-state hidden" data-empty-state>当前没有课程，请点击“新增课程”。</div>
+    <div class="free-period-board" data-free-period-board></div>
+    <div class="empty-state hidden" data-empty-state>没有识别到可用的无课时段，请重新上传清晰的课表图片。</div>
 
     {% if can_save %}
-    <div class="save-bar">
-      <label class="inline-field">
-        保存方式
-        <select data-save-mode>
-          <option value="replace">覆盖当前课表</option>
-          <option value="append">追加到当前课表</option>
-        </select>
-      </label>
+    <div class="save-bar review-save-bar">
       <p class="form-error" data-form-error></p>
-      <button class="button primary" type="button" data-save-schedule>确认保存</button>
+      <button class="button primary" type="button" data-save-schedule>保存无课时间</button>
     </div>
     {% endif %}
   </div>
@@ -75,84 +51,47 @@
 const uploadId = {{ upload_id }};
 const returnUrl = {{ return_url | tojson }};
 let courses = [];
+let freePeriodSchedule = { days: [], free_slots: [], total_free_slots: 0 };
 
-const body = document.querySelector("[data-course-body]");
+const board = document.querySelector("[data-free-period-board]");
 const emptyState = document.querySelector("[data-empty-state]");
-const count = document.querySelector("[data-course-count]");
+const freeCount = document.querySelector("[data-free-count]");
 const errorBox = document.querySelector("[data-form-error]");
+const saveButton = document.querySelector("[data-save-schedule]");
 
-function weekdayOptions(selected) {
-  return ["周一", "周二", "周三", "周四", "周五", "周六", "周日"]
-    .map((label, index) => `<option value="${index + 1}" ${selected === index + 1 ? "selected" : ""}>${label}</option>`)
-    .join("");
+function renderFreePeriods() {
+  const hasCourses = courses.length > 0;
+  const days = hasCourses ? freePeriodSchedule.days || [] : [];
+  freeCount.textContent = hasCourses
+    ? freePeriodSchedule.total_free_slots || 0
+    : 0;
+  emptyState.classList.toggle("hidden", days.length > 0);
+  board.classList.toggle("hidden", days.length === 0);
+  board.innerHTML = days.map((day) => `
+    <article class="free-day">
+      <h3>${API.escapeHtml(day.weekday_label)}</h3>
+      <div class="free-slot-list">
+        ${(day.slots || []).map((slot) => `
+          <div class="free-slot-item" aria-label="${API.escapeHtml(slot.label)}">
+            <strong>${API.escapeHtml(slot.period_label)}</strong>
+            <span>${API.escapeHtml(slot.availability_label)}</span>
+          </div>
+        `).join("")}
+      </div>
+    </article>
+  `).join("");
+  if (saveButton) {
+    saveButton.disabled = !courses.length;
+  }
 }
-
-function render() {
-  count.textContent = courses.length;
-  emptyState.classList.toggle("hidden", courses.length > 0);
-  body.innerHTML = courses.map((course, index) => {
-    const issueReasons = course.issue_reasons || [];
-    const hasIssue = Boolean(course.has_issue || issueReasons.length);
-    const issueText = issueReasons.join("；");
-    return `
-    <tr data-index="${index}" class="${hasIssue ? "issue-row" : ""}" title="${API.escapeHtml(issueText)}">
-      <td><select data-field="weekday">${weekdayOptions(Number(course.weekday))}</select></td>
-      <td><input data-field="start_period" type="number" min="1" max="10" value="${Number(course.start_period) || 1}"></td>
-      <td><input data-field="end_period" type="number" min="1" max="10" value="${Number(course.end_period) || 2}"></td>
-      <td>
-        <input class="${hasIssue ? "field-error" : ""}" data-field="course_name" value="${API.escapeHtml(course.course_name || "")}" maxlength="150">
-        ${hasIssue ? `<small class="issue-note">${API.escapeHtml(issueText || "疑似识别有误")}</small>` : ""}
-      </td>
-      <td><input data-field="weeks" value="${API.escapeHtml(course.weeks || "")}" maxlength="255" placeholder="如：1-16周"></td>
-      <td><input data-field="location" value="${API.escapeHtml(course.location || "")}" maxlength="150"></td>
-      <td><input data-field="note" value="${API.escapeHtml(course.note || "")}" maxlength="255"></td>
-      <td><button class="text-button danger" type="button" data-delete="${index}">删除</button></td>
-    </tr>
-  `;
-  }).join("");
-}
-
-body.addEventListener("input", (event) => {
-  const row = event.target.closest("tr[data-index]");
-  const field = event.target.dataset.field;
-  if (!row || !field) return;
-  courses[Number(row.dataset.index)][field] = event.target.value;
-  row.classList.remove("issue-row");
-});
-
-body.addEventListener("change", (event) => {
-  const row = event.target.closest("tr[data-index]");
-  const field = event.target.dataset.field;
-  if (!row || !field) return;
-  courses[Number(row.dataset.index)][field] = event.target.value;
-  row.classList.remove("issue-row");
-});
-
-body.addEventListener("click", (event) => {
-  const button = event.target.closest("[data-delete]");
-  if (!button) return;
-  courses.splice(Number(button.dataset.delete), 1);
-  render();
-});
-
-document.querySelector("[data-add-course]").addEventListener("click", () => {
-  courses.push({
-    weekday: 1,
-    start_period: 1,
-    end_period: 2,
-    course_name: "",
-    weeks: "",
-    location: "",
-    note: ""
-  });
-  render();
-  body.lastElementChild?.querySelector("[data-field='course_name']")?.focus();
-});
 
 document.querySelector("[data-save-schedule]")?.addEventListener("click", async (event) => {
   errorBox.textContent = "";
+  if (!courses.length) {
+    errorBox.textContent = "没有可保存的识别结果，请重新上传课表。";
+    return;
+  }
   const normalized = courses.map((course) => ({
-    ...course,
     weekday: Number(course.weekday),
     start_period: Number(course.start_period),
     end_period: Number(course.end_period),
@@ -168,7 +107,7 @@ document.querySelector("[data-save-schedule]")?.addEventListener("click", async 
     body: JSON.stringify({
       upload_id: uploadId,
       courses: normalized,
-      replace_existing: document.querySelector("[data-save-mode]").value === "replace"
+      replace_existing: true
     })
   });
   button.disabled = false;
@@ -187,7 +126,8 @@ document.querySelector("[data-save-schedule]")?.addEventListener("click", async 
     return;
   }
   courses = result.draft_courses || [];
-  render();
+  freePeriodSchedule = result.free_period_schedule || freePeriodSchedule;
+  renderFreePeriods();
   document.querySelector("[data-source-image]").src = result.upload.image_url;
   if (result.parser === "vision") {
     document.querySelector("[data-source-label]").textContent = "查看 Qwen 原始返回";

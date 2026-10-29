@@ -7,7 +7,7 @@
     <h1>{{ current_user.name }}，你好</h1>
     <p class="muted">管理员工作台 · {{ current_user.department }}</p>
   </div>
-  <a class="button primary" href="{{ url_for('views.upload') }}">上传成员课表</a>
+  <a class="button primary" href="{{ url_for('views.upload') }}">识别成员无课时间</a>
 </section>
 
 <section class="metric-strip">
@@ -32,15 +32,15 @@
 <section class="action-grid">
   <a class="action-row" href="{{ url_for('views.upload') }}">
     <span>
-      <strong>上传成员课表</strong>
-      <small>选择成员，上传截图并核对课程</small>
+      <strong>识别成员无课时间</strong>
+      <small>选择成员，上传课表截图并直接查看无课时段</small>
     </span>
     <span class="arrow">→</span>
   </a>
   <a class="action-row" href="{{ url_for('views.batch_upload') }}">
     <span>
-      <strong>批量上传课表</strong>
-      <small>一次选择多张截图并按文件名匹配成员</small>
+      <strong>批量识别无课时间</strong>
+      <small>一次选择多张课表截图并按文件名匹配成员</small>
     </span>
     <span class="arrow">→</span>
   </a>

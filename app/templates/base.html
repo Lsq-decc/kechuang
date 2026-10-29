@@ -19,12 +19,12 @@
       <a class="{{ 'active' if request.endpoint == 'views.dashboard' else '' }}" href="{{ url_for('views.dashboard') }}">首页</a>
       <div class="nav-group {{ 'active' if request.endpoint in ['views.upload', 'views.batch_upload', 'views.query', 'views.summary'] else '' }}" data-nav-group>
         <button class="nav-group-toggle" type="button" aria-haspopup="true" aria-expanded="false" data-nav-group-toggle>
-          课表管理
+          无课管理
           <span aria-hidden="true">⌄</span>
         </button>
         <div class="nav-submenu">
-          <a class="{{ 'active' if request.endpoint == 'views.upload' else '' }}" href="{{ url_for('views.upload') }}">上传课表</a>
-          <a class="{{ 'active' if request.endpoint == 'views.batch_upload' else '' }}" href="{{ url_for('views.batch_upload') }}">批量上传</a>
+          <a class="{{ 'active' if request.endpoint == 'views.upload' else '' }}" href="{{ url_for('views.upload') }}">识别无课时间</a>
+          <a class="{{ 'active' if request.endpoint == 'views.batch_upload' else '' }}" href="{{ url_for('views.batch_upload') }}">批量识别无课</a>
           <a class="{{ 'active' if request.endpoint == 'views.query' else '' }}" href="{{ url_for('views.query') }}">无课查询</a>
           <a class="{{ 'active' if request.endpoint == 'views.summary' else '' }}" href="{{ url_for('views.summary') }}">汇总导出</a>
         </div>

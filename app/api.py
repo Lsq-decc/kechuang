@@ -20,6 +20,7 @@ from .ai_schedule_parser import (
 )
 from .decorators import roles_required
 from .extensions import db
+from .free_periods import build_free_period_schedule
 from .models import (
     AvailabilityOverride,
     Course,
@@ -37,6 +38,7 @@ from .vision_schedule_parser import (
     is_enabled as is_vision_parser_enabled,
     parse_schedule_with_vision,
 )
+from .week_rules import course_occurs_in_week
 
 
 api_bp = Blueprint("api", __name__)
@@ -437,8 +439,8 @@ def upload_schedule_image():
                     courses = normalized_vision_courses
                     parser_used = "vision"
                     warning_message = (
-                        "已使用 Qwen 视觉模型直接读取原图并整理课程，"
-                        "请重点核对课程名称、周数、节次和地点。"
+                        "已使用 Qwen 视觉模型读取原图，"
+                        "请核对生成的无课时间是否准确。"
                     )
                     if skipped_vision_courses:
                         warning_message += (
@@ -493,7 +495,7 @@ def upload_schedule_image():
                         parser_used = "deepseek"
                         warning_message = (
                             "已按课表单元格切分并交给 DeepSeek 解析，"
-                            "请重点核对课程名称、周数和地点。"
+                            "请核对生成的无课时间是否准确。"
                         )
                         if skipped_deepseek_courses:
                             warning_message += (
@@ -518,12 +520,12 @@ def upload_schedule_image():
     except OCRUnavailable as exc:
         courses = []
         warnings.append(str(exc))
-        warnings.append("OCR 不可用，已进入手动录入模式。")
+        warnings.append("识别不可用，暂时无法生成无课时间，请重新上传。")
     except Exception as exc:
         current_app.logger.exception("OCR failed for upload %s", stored_filename)
         courses = []
         warnings.append(f"OCR 识别失败：{exc}")
-        warnings.append("可以继续在修正页手动添加课程。")
+        warnings.append("暂时无法生成无课时间，请重新上传清晰的课表图片。")
 
     owner_detection = _owner_detection_from_vision(ai_metadata)
     if not owner_detection:
@@ -557,10 +559,12 @@ def upload_schedule_image():
     db.session.add(upload)
     db.session.flush()
 
+    free_period_schedule = build_free_period_schedule(courses)
     upload.ocr_text = ocr_text
     upload.ocr_result = {
         "items": raw_items,
         "courses": courses,
+        "free_period_schedule": free_period_schedule,
         "warnings": warnings,
         "owner_detection": owner_detection,
         "member_created": member_created,
@@ -577,6 +581,7 @@ def upload_schedule_image():
             "upload": upload.to_dict(),
             "user": target_user.to_dict(),
             "draft_courses": courses,
+            "free_period_schedule": free_period_schedule,
             "warnings": warnings,
             "owner_detection": owner_detection,
             "member_created": member_created,
@@ -586,7 +591,7 @@ def upload_schedule_image():
             "layout_metadata": layout_metadata,
             "review_url": f"/review/{upload.id}",
         },
-        "图片已上传，请核对识别结果",
+        "图片已上传，无课时间已识别",
         201,
     )
 
@@ -597,11 +602,15 @@ def get_schedule_draft(upload_id):
     upload = ScheduleUpload.query.get_or_404(upload_id)
 
     result = upload.ocr_result or {}
+    draft_courses = result.get("courses", [])
     return _ok(
         {
             "upload": upload.to_dict(),
             "user": upload.user.to_dict(),
-            "draft_courses": result.get("courses", []),
+            "draft_courses": draft_courses,
+            "free_period_schedule": build_free_period_schedule(
+                draft_courses
+            ),
             "ocr_items": result.get("items", []),
             "warnings": result.get("warnings", []),
             "owner_detection": result.get("owner_detection"),
@@ -689,8 +698,11 @@ def save_schedule():
             "saved_count": len(normalized_courses),
             "user": target_user.to_dict(),
             "courses": [course.to_dict() for course in courses],
+            "free_period_schedule": build_free_period_schedule(
+                [course.to_dict() for course in courses]
+            ),
         },
-        "课表保存成功",
+        "无课时间保存成功",
     )
 
 
@@ -1235,28 +1247,3 @@ def _validate_course(raw, index):
 
 def _periods_overlap(query_start, query_end, course_start, course_end):
     return max(query_start, course_start) <= min(query_end, course_end)
-
-
-def course_occurs_in_week(weeks_text, week_number):
-    text = (weeks_text or "").strip()
-    if not text:
-        return True
-
-    odd_only = "单周" in text or "(单)" in text or "（单）" in text
-    even_only = "双周" in text or "(双)" in text or "（双）" in text
-    if odd_only and week_number % 2 == 0:
-        return False
-    if even_only and week_number % 2 != 0:
-        return False
-
-    ranges = re.findall(r"(\d{1,2})\s*[-~—－至到]\s*(\d{1,2})", text)
-    if ranges:
-        return any(int(start) <= week_number <= int(end) for start, end in ranges)
-
-    singles = re.findall(r"(?<!\d)(\d{1,2})(?!\s*[-~—－至到]\d)", text)
-    if singles:
-        return week_number in {int(value) for value in singles}
-
-    # With no parseable week range, a recorded course is treated conservatively
-    # as occupying every week.
-    return True
